@@ -1,0 +1,30 @@
+<ui:FluentWindow x:Class="FFMedia.App.MainWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="FFMedia" Width="1000" Height="640"
+                 WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="FFMedia" />
+
+        <!-- M0: navigation pane is intentionally empty (no tools yet). Tool binding
+             (MenuItemsSource) is wired in M1 once the first ITool exists and the exact
+             WPF-UI items API is confirmed against the installed WPF-UI version.
+
+             NOTE (WPF-UI 4.3.0 adaptation): NavigationView derives from Control (not
+             ContentControl) in this version and has no settable Content property -
+             it owns its own internal content presenter. Content is shown by calling
+             RootNavigation.Navigate(typeof(Page)) in code-behind (see MainWindow.xaml.cs)
+             instead of nesting a <Frame> inside <ui:NavigationView.Content>. -->
+        <ui:NavigationView Grid.Row="1" x:Name="RootNavigation"
+                           IsBackButtonVisible="Collapsed"
+                           PaneDisplayMode="Left" />
+    </Grid>
+</ui:FluentWindow>

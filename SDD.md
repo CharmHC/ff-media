@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.1 · **Last updated:** 2026-07-04
+> **Status:** Living document · **Version:** 0.2 · **Last updated:** 2026-07-04
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -77,7 +77,7 @@ FFMedia is, at its heart, a **polished orchestrator** over `yt-dlp` + `ffmpeg`.
 | Logging | **Serilog** (file + in-app sink) | Diagnose yt-dlp/ffmpeg failures from user logs. |
 | Persistence | **System.Text.Json** (settings/presets/history) | Simple; migrate history to SQLite only if it grows. |
 | Packaging / update | **[Velopack](https://velopack.io/)** | Installer + delta auto-update, no UAC prompt; can update bundled yt-dlp. |
-| Testing | **xUnit** + **FluentAssertions** | Core is UI-agnostic and fully unit-testable. |
+| Testing | **xUnit** | Tests use xUnit. Assertion library deferred — FluentAssertions v8+ is a paid commercial license; evaluate **Shouldly** / **AwesomeAssertions** (both free) when richer assertions are needed. M0 uses plain `Assert`. |
 
 > **Rejected alternatives:** WinUI 3 (rougher windowing/packaging for a solo dev),
 > Xabe.FFmpeg (CC BY-NC-SA / non-commercial), Electron/Tauri (heavier, non-native),
@@ -129,9 +129,8 @@ public interface ITool
     string Id { get; }              // stable, e.g. "youtube-downloader"
     string DisplayName { get; }     // "YouTube Downloader"
     string Description { get; }
-    SymbolRegular Icon { get; }     // WPF-UI icon
+    string IconGlyph { get; }       // Segoe Fluent Icons glyph; kept a string so Core stays UI-agnostic
     int SortOrder { get; }
-    Type ViewModelType { get; }     // resolved from DI; view located by convention
 }
 ```
 
@@ -375,7 +374,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | # | Milestone | Deliverable |
 |---|---|---|
-| **M0** | Foundation | Repo + solution scaffold, `.gitignore`, CI build, `IBinaryProvider` + binary-fetch script, WPF-UI shell with empty `NavigationView`, DI/host wiring, Serilog. |
+| **M0** | Foundation | ✅ delivered (branch `feat/m0-foundation`) — Repo + solution scaffold, `.gitignore`, CI build, `IBinaryProvider` + binary-fetch script, WPF-UI shell with empty `NavigationView`, DI/host wiring, Serilog. |
 | **M1** | Vertical slice | Paste URL → probe → download single **MP4** with **live progress + cancel**. End-to-end through all layers. |
 | **M2** | Formats | Full format matrix: video containers + audio-only (**wav/mp3**/m4a/opus/flac) + quality/resolution. `OptionSet` builder fully tested. |
 | **M3** | Queue | Download **queue**, bounded **concurrency**, **playlist/channel** support. |
@@ -420,4 +419,5 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-04 | 0.2 | M0 foundation delivered: solution skeleton, Core (`ITool`/`IToolRegistry`, `IBinaryProvider`, `AddFFMediaCore`), WPF-UI shell w/ Host+Serilog, fetch-binaries script, CI. `ITool.Icon` is now a string glyph (Core stays UI-agnostic); assertion library deferred (FluentAssertions v8 is paid); M0 uses plain xUnit `Assert`. WPF-UI resolved to 4.3.0. |
 | 2026-07-04 | 0.1 | Initial SDD from brainstorming: stack (WPF+WPF-UI/.NET 9), modular shell architecture, downloader design, milestones M0–M7. |

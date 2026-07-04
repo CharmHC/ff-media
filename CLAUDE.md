@@ -33,6 +33,15 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-04 — M0 Foundation
+
+- **Done:** Solution skeleton (Core/Media/Tools/App/Tests); Core `ITool`/`IToolRegistry`,
+  `IBinaryProvider`, `AddFFMediaCore` (all unit-tested); WPF-UI Fluent shell with Generic
+  Host + Serilog + `NavigationView` seam; `build/fetch-binaries.ps1`; GitHub Actions CI.
+- **Changed:** `ITool.Icon` → `string IconGlyph` (keeps Core UI-agnostic); assertions use
+  plain xUnit `Assert` (FluentAssertions v8 is paid) — SDD updated to v0.2.
+- **Next:** M1 — vertical slice: URL → probe → download single MP4 with progress + cancel.
+
 ### 2026-07-04 — Add branch-per-task / PR-review workflow rule
 
 - **Done:** Added standing Rule 3 — always branch off `main` per task and deliver
