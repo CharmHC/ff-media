@@ -10,14 +10,24 @@ public partial class DownloaderViewModel : ObservableObject
 {
     private readonly IMediaProbe _probe;
     private readonly IDownloadService _download;
+    private readonly Func<Action<DownloadUpdate>, IProgress<DownloadUpdate>> _progressFactory;
     private CancellationTokenSource? _cts;
 
-    public DownloaderViewModel(IMediaProbe probe, IDownloadService download)
+    public DownloaderViewModel(
+        IMediaProbe probe,
+        IDownloadService download,
+        Func<Action<DownloadUpdate>, IProgress<DownloadUpdate>>? progressFactory = null)
     {
         ArgumentNullException.ThrowIfNull(probe);
         ArgumentNullException.ThrowIfNull(download);
         _probe = probe;
         _download = download;
+        // Production default: Progress<T> captures the current SynchronizationContext at
+        // construction time and marshals callbacks back onto it (the WPF UI thread). Tests
+        // run with no SynchronizationContext, so Progress<T> posts callbacks to the ThreadPool
+        // instead, which can run after the awaited download completes. Injecting the factory
+        // lets tests substitute a synchronous IProgress<T> without changing production wiring.
+        _progressFactory = progressFactory ?? (handler => new Progress<DownloadUpdate>(handler));
         OutputFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "FFMedia");
     }
@@ -25,6 +35,7 @@ public partial class DownloaderViewModel : ObservableObject
     [ObservableProperty] private string _url = string.Empty;
     [ObservableProperty] private string _mediaTitle = string.Empty;
     [ObservableProperty] private string _statusMessage = string.Empty;
+    [ObservableProperty] private string _progressText = string.Empty;
     [ObservableProperty] private double _progress;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _outputFolder;
@@ -60,18 +71,21 @@ public partial class DownloaderViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(Url)) return;
         IsBusy = true;
         Progress = 0;
+        ProgressText = string.Empty;
         StatusMessage = "Downloading…";
         _cts = new CancellationTokenSource();
-        var progress = new Progress<DownloadUpdate>(u =>
+        // Live progress updates ONLY Progress/ProgressText, never StatusMessage. StatusMessage
+        // is a terminal-outcome field set exclusively on the awaiting thread below, so it can
+        // never be clobbered by a progress callback that runs after the download completes.
+        var progress = _progressFactory(u =>
         {
             Progress = u.Percent;
-            StatusMessage = $"{u.Stage} {u.Percent:0}%  {u.Speed}  ETA {u.Eta}";
+            ProgressText = $"{u.Stage} {u.Percent:0}%  {u.Speed}  ETA {u.Eta}";
         });
         try
         {
             var result = await _download.DownloadAsync(
                 new DownloadRequest(Url, OutputFolder), progress, _cts.Token);
-            await Task.Yield();
             StatusMessage = result.IsSuccess
                 ? $"Saved to {result.Value}"
                 : result.Error ?? "Download failed";
