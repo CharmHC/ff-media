@@ -20,7 +20,11 @@ milestones. Read it before making design decisions.
 2. **Record progress after every task** in the [Progress Log](#-progress-log)
    below. Append a dated entry describing what was done, what changed, and what's
    next. Newest entries go at the top.
-3. When these two conflict with anything else, these rules win unless the user
+3. **Branch per task; deliver via PR.** Never commit task work directly to `main`.
+   For each task, branch off the latest `main` (e.g. `feat/…`, `fix/…`, `docs/…`),
+   commit there, push, and open a **PR for the user to review**. Do not merge — the
+   user reviews and merges.
+4. When these rules conflict with anything else, these rules win unless the user
    says otherwise.
 
 ---
@@ -28,6 +32,15 @@ milestones. Read it before making design decisions.
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-04 — Add branch-per-task / PR-review workflow rule
+
+- **Done:** Added standing Rule 3 — always branch off `main` per task and deliver
+  via a PR for user review (never commit task work to `main`, never self-merge).
+  This change itself delivered on branch `docs/pr-workflow-rule` via PR.
+- **Note:** `gh` CLI not yet installed, so PRs are teed up via a GitHub compare
+  link rather than opened automatically. Install `gh` to let me open PRs directly.
+- **Next:** M0 (Foundation) implementation plan — on its own branch + PR.
 
 ### 2026-07-04 — Project bootstrap & design
 
