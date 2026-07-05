@@ -36,6 +36,8 @@ public partial class App : Application
                 services.AddSingleton<INavigationService, NavigationService>();
                 services.AddYouTubeDownloader();
                 services.AddSingleton<FFMedia.App.Services.ThemeService>();
+                services.AddTransient<FFMedia.App.ViewModels.SettingsViewModel>();
+                services.AddTransient<FFMedia.App.Views.SettingsPage>();
                 services.AddSingleton<MainWindowViewModel>();
                 services.AddSingleton<MainWindow>();
             })

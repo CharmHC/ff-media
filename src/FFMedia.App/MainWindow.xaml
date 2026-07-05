@@ -12,7 +12,15 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="FFMedia" />
+        <ui:TitleBar Grid.Row="0" Title="FFMedia">
+            <ui:TitleBar.Header>
+                <ui:Button Icon="{ui:SymbolIcon WeatherMoon24}"
+                           Appearance="Transparent"
+                           HorizontalAlignment="Right" Margin="0,0,8,0"
+                           ToolTip="Toggle light/dark theme"
+                           Command="{Binding ToggleThemeCommand}" />
+            </ui:TitleBar.Header>
+        </ui:TitleBar>
 
         <!-- NOTE (WPF-UI 4.3.0 adaptation): NavigationView derives from Control (not
              ContentControl) in this version and has no settable Content property -
@@ -21,6 +29,7 @@
              INavigationViewPageProvider wired in MainWindow.xaml.cs / App.xaml.cs. -->
         <ui:NavigationView Grid.Row="1" x:Name="RootNavigation"
                            MenuItemsSource="{Binding MenuItems}"
+                           FooterMenuItemsSource="{Binding FooterMenuItems}"
                            IsBackButtonVisible="Collapsed"
                            PaneDisplayMode="Left" />
     </Grid>
