@@ -55,7 +55,12 @@ public sealed class DownloadManager : IDownloadManager, IDisposable
     public void ClearCompleted()
     {
         for (var i = _jobs.Count - 1; i >= 0; i--)
-            if (_jobs[i].IsTerminal) _jobs.RemoveAt(i);
+        {
+            var job = _jobs[i];
+            if (!job.IsTerminal) continue;
+            _jobs.RemoveAt(i);
+            job.Cts.Dispose(); // terminal job is done running — release its CTS
+        }
     }
 
     public Task IdleAsync()
@@ -146,7 +151,12 @@ public sealed class DownloadManager : IDownloadManager, IDisposable
     private static string Describe(DownloadUpdate u) =>
         $"{u.Stage} {u.Percent:0}%  {u.Speed}  ETA {u.Eta}";
 
-    public void Dispose() => _slots.Dispose();
+    public void Dispose()
+    {
+        foreach (var job in _jobs)
+            job.Cts.Dispose();
+        _slots.Dispose();
+    }
 
     /// <summary>An <see cref="IProgress{T}"/> that invokes the handler synchronously on the caller's thread
     /// (unlike <see cref="Progress{T}"/>, which posts to the ThreadPool when there is no SynchronizationContext).</summary>
