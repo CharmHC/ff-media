@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.2 · **Last updated:** 2026-07-04
+> **Status:** Living document · **Version:** 0.3 · **Last updated:** 2026-07-05
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -140,6 +140,9 @@ public interface ITool
   hosts the selected tool's view. **Adding a tool never modifies the shell.**
 - Views are matched to ViewModels by naming convention (`FooViewModel` → `FooView`)
   via a `ViewLocator`.
+- A tool advertises its root page to the shell via `IToolPage { string ToolId; Type PageType; }`
+  (Core, `System.Type` only — keeps Core UI-agnostic). The shell joins registered
+  `ITool`s with their `IToolPage`s to build the `NavigationView` items.
 
 ---
 
@@ -163,6 +166,12 @@ ff-media/
    ├─ FFMedia.Tools.YouTubeDownloader/  ← v1 tool module (VMs, Views, orchestration)
    └─ FFMedia.Tests/             ← xUnit tests (targets Core + module logic)
 ```
+
+**Target frameworks:** `FFMedia.Core` and `FFMedia.Media` target `net9.0` and stay
+UI-framework-free. **Tool modules that hold WPF Views/ViewModels**
+(e.g. `FFMedia.Tools.YouTubeDownloader`) target **`net9.0-windows` with `UseWPF=true`**.
+**`FFMedia.Tests` targets `net9.0-windows`** so it can reference the module and
+unit-test ViewModels headlessly (no window is shown).
 
 **Dependency rules (enforced by project references):**
 
@@ -266,7 +275,10 @@ directly (as opposed to delegating to yt-dlp):
   `assets/binaries/`. They are **git-ignored**; a `build/fetch-binaries` script
   downloads pinned versions for local dev and CI.
 - **Resolution:** `IBinaryProvider` resolves the app-relative binary path at
-  runtime; never relies on the system PATH.
+  runtime (`AppContext.BaseDirectory/assets/binaries`); never relies on the system
+  PATH. The **`FFMedia.App` and `FFMedia.Tests` builds copy `assets/binaries/*.exe`
+  into their output** so `dotnet run` and the integration tests find the binaries
+  (no-op when the folder is empty — run `build/fetch-binaries.ps1` first).
 - **Updating:**
   - **App + ffmpeg** update via **Velopack** releases.
   - **yt-dlp** additionally supports in-app self-update (`yt-dlp -U`) because it
@@ -375,7 +387,7 @@ Each milestone is a **vertical, shippable increment**.
 | # | Milestone | Deliverable |
 |---|---|---|
 | **M0** | Foundation | ✅ delivered (branch `feat/m0-foundation`) — Repo + solution scaffold, `.gitignore`, CI build, `IBinaryProvider` + binary-fetch script, WPF-UI shell with empty `NavigationView`, DI/host wiring, Serilog. |
-| **M1** | Vertical slice | Paste URL → probe → download single **MP4** with **live progress + cancel**. End-to-end through all layers. |
+| **M1** | Vertical slice | ✅ delivered (branch `feat/m1-vertical-slice`) — Paste URL → probe → download single **MP4** with **live progress + cancel**. End-to-end through all layers. |
 | **M2** | Formats | Full format matrix: video containers + audio-only (**wav/mp3**/m4a/opus/flac) + quality/resolution. `OptionSet` builder fully tested. |
 | **M3** | Queue | Download **queue**, bounded **concurrency**, **playlist/channel** support. |
 | **M4** | Processing | **Trim/clip**, **subtitles**, **metadata + thumbnail** embedding. |
@@ -419,5 +431,6 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-05 | 0.3 | M1 vertical slice delivered: YouTube Downloader tool (probe + single-MP4 download w/ live progress + cancel) via YoutubeDLSharp; module + tests retargeted to `net9.0-windows` (UseWPF); `IMediaProbe`/`IDownloadService` seam with a unit-tested `DownloaderViewModel` (fakes) + trait-gated yt-dlp integration test; shell nav wiring joins `ITool` + `IToolPage` (WPF-UI navigation); added `Result<T>` and `IToolPage` to Core. |
 | 2026-07-04 | 0.2 | M0 foundation delivered: solution skeleton, Core (`ITool`/`IToolRegistry`, `IBinaryProvider`, `AddFFMediaCore`), WPF-UI shell w/ Host+Serilog, fetch-binaries script, CI. `ITool.Icon` is now a string glyph (Core stays UI-agnostic); assertion library deferred (FluentAssertions v8 is paid); M0 uses plain xUnit `Assert`. WPF-UI resolved to 4.3.0. |
 | 2026-07-04 | 0.1 | Initial SDD from brainstorming: stack (WPF+WPF-UI/.NET 9), modular shell architecture, downloader design, milestones M0–M7. |

@@ -1,19 +1,20 @@
 using FFMedia.App.ViewModels;
-using FFMedia.App.Views;
-using Wpf.Ui.Controls;
+using Wpf.Ui;                 // INavigationService
+using Wpf.Ui.Controls;        // FluentWindow
 
 namespace FFMedia.App;
 
 public partial class MainWindow : FluentWindow
 {
-    public MainWindow(MainWindowViewModel viewModel)
+    public MainWindow(MainWindowViewModel viewModel, INavigationService navigationService)
     {
         DataContext = viewModel;
         InitializeComponent();
 
-        // Navigate once the NavigationView's control template (and its internal
-        // content presenter) has been applied. WPF-UI 4.3.0's NavigationView has no
-        // externally settable Content/Frame, so navigation happens via Navigate().
-        Loaded += (_, _) => RootNavigation.Navigate(typeof(WelcomePage));
+        // NavigationService.SetNavigationControl also propagates the DI-backed
+        // INavigationViewPageProvider (registered via AddNavigationViewPageProvider())
+        // onto RootNavigation, so selecting a MenuItemsSource entry resolves its
+        // TargetPageType through the app's service provider.
+        navigationService.SetNavigationControl(RootNavigation);
     }
 }

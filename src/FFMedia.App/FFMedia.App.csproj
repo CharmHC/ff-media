@@ -5,6 +5,16 @@
     <ProjectReference Include="..\FFMedia.Tools.YouTubeDownloader\FFMedia.Tools.YouTubeDownloader.csproj" />
   </ItemGroup>
 
+  <!-- Deploy the bundled yt-dlp/ffmpeg into <out>/assets/binaries so IBinaryProvider
+       (AppContext.BaseDirectory/assets/binaries) resolves them at runtime. The exes are
+       git-ignored and fetched by build/fetch-binaries.ps1. -->
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)..\..\assets\binaries\*.exe"
+             Link="assets\binaries\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\assets\binaries')" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
@@ -12,6 +22,7 @@
     <PackageReference Include="Serilog.Sinks.Debug" Version="3.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <PackageReference Include="WPF-UI.DependencyInjection" Version="4.3.0" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -24,4 +24,4 @@ jobs:
         run: dotnet build FFMedia.sln --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test FFMedia.sln --configuration Release --no-build --verbosity normal
+        run: dotnet test FFMedia.sln --configuration Release --no-build --verbosity normal --filter "Category!=Integration"
