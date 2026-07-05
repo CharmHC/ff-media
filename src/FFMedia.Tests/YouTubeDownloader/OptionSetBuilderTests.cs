@@ -1,3 +1,4 @@
+using System;
 using FFMedia.Tools.YouTubeDownloader.Models;
 using FFMedia.Tools.YouTubeDownloader.Services;
 using YoutubeDLSharp.Options;
@@ -12,6 +13,9 @@ public class OptionSetBuilderTests
 
     private static DownloadConfig Audio(AudioFormat f, AudioBitrate b) =>
         new(OutputKind.Audio, VideoContainer.Mp4, VideoResolution.Best, f, b, ProcessingOptions.Default);
+
+    private static DownloadConfig WithProcessing(ProcessingOptions p, OutputKind kind = OutputKind.Video) =>
+        DownloadConfig.Default with { Kind = kind, Processing = p };
 
     [Fact]
     public void Video_Mp4_1080p_SetsMergeMp4_HeightCap_Mp4ExtPreference_AndOutputTemplate()
@@ -119,5 +123,66 @@ public class OptionSetBuilderTests
     {
         var o = OptionSetBuilder.Build(Audio(AudioFormat.Flac, AudioBitrate.K256), @"C:\out");
         Assert.DoesNotContain("--audio-quality", o.ToString());
+    }
+
+    [Fact]
+    public void Default_EmbedsMetadataAndThumbnail_NoTrim_NoSubs()
+    {
+        var o = OptionSetBuilder.Build(DownloadConfig.Default, @"C:\out");
+        Assert.True(o.EmbedMetadata);
+        Assert.True(o.EmbedThumbnail);
+        Assert.False(o.WriteSubs);
+        Assert.DoesNotContain("download-sections", o.ToString());
+    }
+
+    [Fact]
+    public void Trim_Fast_SetsDownloadSections_NoForceKeyframes()
+    {
+        var p = ProcessingOptions.Default with { Trim = new TrimRange(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(5)) };
+        var o = OptionSetBuilder.Build(WithProcessing(p), @"C:\out");
+        Assert.Contains("*0-5", o.ToString());
+        Assert.False(o.ForceKeyframesAtCuts);
+    }
+
+    [Fact]
+    public void Trim_Precise_SetsForceKeyframes()
+    {
+        var p = ProcessingOptions.Default with
+        {
+            Trim = new TrimRange(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20)),
+            PreciseCut = true,
+        };
+        var o = OptionSetBuilder.Build(WithProcessing(p), @"C:\out");
+        Assert.Contains("*10-20", o.ToString());
+        Assert.True(o.ForceKeyframesAtCuts);
+    }
+
+    [Fact]
+    public void Subtitles_Video_SetsWriteAndEmbedAndLangs()
+    {
+        var p = ProcessingOptions.Default with { EmbedSubtitles = true, SubtitleLanguage = "es" };
+        var o = OptionSetBuilder.Build(WithProcessing(p, OutputKind.Video), @"C:\out");
+        Assert.True(o.WriteSubs);
+        Assert.True(o.WriteAutoSubs);
+        Assert.True(o.EmbedSubs);
+        Assert.Equal("es", o.SubLangs);
+    }
+
+    [Fact]
+    public void Subtitles_Audio_AreIgnored()
+    {
+        var p = ProcessingOptions.Default with { EmbedSubtitles = true, SubtitleLanguage = "en" };
+        var o = OptionSetBuilder.Build(WithProcessing(p, OutputKind.Audio), @"C:\out");
+        Assert.False(o.WriteSubs);
+        Assert.False(o.EmbedSubs);
+    }
+
+    [Fact]
+    public void Embed_FlagsOff_DisableMetadataAndThumbnail()
+    {
+        var p = ProcessingOptions.Default with { EmbedMetadata = false, EmbedThumbnail = false };
+        var o = OptionSetBuilder.Build(WithProcessing(p), @"C:\out");
+        Assert.False(o.EmbedMetadata);
+        Assert.False(o.EmbedThumbnail);
     }
 }
