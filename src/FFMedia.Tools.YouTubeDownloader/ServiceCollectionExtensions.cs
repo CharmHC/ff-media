@@ -17,6 +17,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IYoutubeDlFactory, YoutubeDlFactory>();
         services.AddSingleton<IMediaProbe, YtDlpMediaProbe>();
         services.AddSingleton<IDownloadService, YtDlpDownloadService>();
+        services.AddSingleton<RetryPolicy>(RetryPolicy.Default);
+        services.AddSingleton<IDownloadManager, DownloadManager>();
+        services.AddSingleton<IPlaylistProbe, YtDlpPlaylistProbe>();
         services.AddTransient<DownloaderViewModel>();
         services.AddTransient<DownloaderPage>();
         return services;

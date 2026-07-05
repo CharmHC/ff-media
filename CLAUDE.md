@@ -33,6 +33,66 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-05 — M4 Processing
+
+- **Done:** `ProcessingOptions` (`TrimRange?` Trim, `PreciseCut`, `EmbedSubtitles`,
+  `SubtitleLanguage`, `EmbedMetadata`, `EmbedThumbnail`; default metadata+thumbnail ON,
+  subs+trim off, language "en") added to `DownloadConfig.Processing`. Pure
+  `OptionSetBuilder.ApplyProcessing` emits: trim → `--download-sections "*<start>-<end>"`
+  (keyframe-fast), `PreciseCut` additionally emits `--force-keyframes-at-cuts`; subtitles
+  **video-only** → `--write-subs --write-auto-subs --embed-subs --sub-langs <lang>`;
+  `--embed-metadata`/`--embed-thumbnail` from the flags. Pure `TrimParsing` parses
+  HH:MM:SS / MM:SS / seconds into a `TimeSpan`, producing a range only when both ends
+  parse and End > Start. `DownloaderViewModel` gained processing selections (+ live
+  `TrimHint` validation) that assemble `ProcessingOptions` per job; the page gained a
+  "Processing" section (trim start/end + precise cut, embed subtitles + language, embed
+  metadata/thumbnail). All processing flows per-job through the M3 queue. SDD synced to
+  v0.6 (§7.3 processing flags, §8 trim-via-yt-dlp note, §17 M4 row).
+- **Decisions:** precise-cut is a per-download toggle (not global); subtitles are
+  video-only (ignored for audio downloads); metadata + thumbnail default ON; embedding a
+  thumbnail is container-dependent — works for mp4/mkv/mp3/m4a, yt-dlp warns (but still
+  proceeds) for webm/opus; trim uses yt-dlp's own `--download-sections` rather than a
+  post-download `FFMedia.Media`/FFMpegCore pass — the FFMpegCore trim wrapper stays
+  reserved for future tools that need frame-accurate cutting independent of yt-dlp.
+- **Next:** M5 — settings, presets, history, notifications, dark/light theming.
+
+### 2026-07-05 — M3 Queue
+
+- **Done:** Download queue engine in `FFMedia.Tools.YouTubeDownloader`: `DownloadJob`
+  (observable `Status`/`Progress`/`ProgressText`/`ErrorMessage`/`OutputPath` + per-job
+  `CancellationTokenSource`), `JobStatus { Queued, Downloading, Processing, Completed,
+  Canceled, Failed }`, `RetryPolicy` (transient-error classification + exponential
+  backoff, default 3 attempts/1s), and `IDownloadManager`/`DownloadManager` (bounded
+  concurrency via `SemaphoreSlim`, default cap 3; auto-start on enqueue; per-job cancel
+  + cancel-all; clear-completed; failure isolation; `IdleAsync()` for deterministic
+  tests). Added playlist/channel expansion (`IPlaylistProbe`/`YtDlpPlaylistProbe` +
+  pure `PlaylistMapping`/`MediaEntry`) so a playlist URL becomes one job per entry at
+  add-time. `DownloaderViewModel` restructured from single probe/download to
+  "add to queue" with a bound `Jobs` list; the page shows the queue with per-job
+  progress/cancel plus cancel-all/clear-completed. Trait-gated queue integration test
+  added. SDD synced to v0.5 (§6 queue placement, §7.2 realized state machine, §12
+  concurrency model, §17 M3 row, §19 resolutions).
+- **Decisions:** auto-start on add (no separate "start" step); transient-only
+  auto-retry with exponential backoff, permanent errors fail fast; probing/playlist
+  expansion happens at add-time so `DownloadManager` stays a pure download engine (no
+  `Fetching` state inside it); cancel-only for M3 (no pause/resume — stays a stretch
+  goal per §19); concurrency cap = 3 is a constant this milestone (user-configurable
+  deferred to M5); queue lives in the YouTube Downloader module, not `FFMedia.Core`
+  (it orchestrates the module's own `IMediaProbe`/`IDownloadService`) — the generic
+  bounded-concurrency shape can move to Core if a second tool needs it.
+- **Next:** M4 — trim/clip, subtitles, and metadata + thumbnail embedding.
+
+### 2026-07-05 — M2 Formats
+
+- **Done:** Full format matrix — a pure, exhaustively-tested `OptionSetBuilder` maps a
+  `DownloadConfig` to yt-dlp options: video MP4/MKV/WebM at a resolution cap, or audio-only
+  MP3/WAV/M4A/Opus/FLAC with a bitrate (lossless ignores it). ViewModel exposes the
+  selections; the page gained Video/Audio + format/quality dropdowns. SDD §7.3 finalized.
+- **Changed:** dropped M1's `RecodeVideo` (re-encode) for `MergeOutputFormat` (mux); removed
+  `DownloadOptions.Mp4`; `DownloadRequest` now carries a `DownloadConfig`. Audio bitrate uses
+  `OptionSet.AddCustomOption("--audio-quality", …)` (typed `AudioQuality` is 0–10 VBR only).
+- **Next:** M3 — download queue, bounded concurrency, playlist/channel support.
+
 ### 2026-07-05 — M1 fix: crash on Probe (missing binaries + no error isolation)
 
 - **Bug:** Clicking **Probe** closed the app with no dialog/log. Root cause (found via

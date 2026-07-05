@@ -39,7 +39,7 @@ public class YtDlpServiceErrorTests
         var progress = new Progress<DownloadUpdate>(_ => { });
 
         var result = await svc.DownloadAsync(
-            new DownloadRequest("https://www.youtube.com/watch?v=jNQXAC9IVRw", Path.GetTempPath()),
+            new DownloadRequest("https://www.youtube.com/watch?v=jNQXAC9IVRw", Path.GetTempPath(), DownloadConfig.Default),
             progress, CancellationToken.None);
 
         Assert.False(result.IsSuccess);

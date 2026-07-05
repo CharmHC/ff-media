@@ -47,7 +47,61 @@ public class YtDlpIntegrationTests
             var updates = new List<DownloadUpdate>();
             var progress = new Progress<DownloadUpdate>(updates.Add);
 
-            var result = await svc.DownloadAsync(new DownloadRequest(TestUrl, outDir), progress, CancellationToken.None);
+            var result = await svc.DownloadAsync(new DownloadRequest(TestUrl, outDir, DownloadConfig.Default), progress, CancellationToken.None);
+
+            Assert.True(result.IsSuccess, result.Error);
+            Assert.NotEmpty(Directory.GetFiles(outDir, "*.mp4"));
+        }
+        finally
+        {
+            if (Directory.Exists(outDir)) Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Download_AudioMp3_ProducesMp3File()
+    {
+        var binaries = RealBinaries();
+        Assert.True(binaries.Exists(ExternalBinary.Ffmpeg), "Run build/fetch-binaries.ps1 first.");
+        var outDir = Path.Combine(Path.GetTempPath(), "ffmedia-int-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outDir);
+        try
+        {
+            var svc = new YtDlpDownloadService(new YoutubeDlFactory(binaries));
+            var config = new DownloadConfig(
+                OutputKind.Audio, VideoContainer.Mp4, VideoResolution.Best, AudioFormat.Mp3, AudioBitrate.K192,
+                ProcessingOptions.Default);
+            var progress = new Progress<DownloadUpdate>(_ => { });
+
+            var result = await svc.DownloadAsync(new DownloadRequest(TestUrl, outDir, config), progress, CancellationToken.None);
+
+            Assert.True(result.IsSuccess, result.Error);
+            Assert.NotEmpty(Directory.GetFiles(outDir, "*.mp3"));
+        }
+        finally
+        {
+            if (Directory.Exists(outDir)) Directory.Delete(outDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Download_TrimmedWithEmbeds_ProducesFile()
+    {
+        var binaries = RealBinaries();
+        Assert.True(binaries.Exists(ExternalBinary.Ffmpeg), "Run build/fetch-binaries.ps1 first.");
+        var outDir = Path.Combine(Path.GetTempPath(), "ffmedia-int-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outDir);
+        try
+        {
+            var svc = new YtDlpDownloadService(new YoutubeDlFactory(binaries));
+            var processing = new ProcessingOptions(
+                Trim: new TrimRange(TimeSpan.Zero, TimeSpan.FromSeconds(5)),
+                PreciseCut: false, EmbedSubtitles: false, SubtitleLanguage: "en",
+                EmbedMetadata: true, EmbedThumbnail: true);
+            var config = DownloadConfig.Default with { Processing = processing };
+            var progress = new Progress<DownloadUpdate>(_ => { });
+
+            var result = await svc.DownloadAsync(new DownloadRequest(TestUrl, outDir, config), progress, CancellationToken.None);
 
             Assert.True(result.IsSuccess, result.Error);
             Assert.NotEmpty(Directory.GetFiles(outDir, "*.mp4"));
