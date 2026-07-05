@@ -9,9 +9,11 @@ public sealed record DownloadConfig(
     VideoContainer Container,
     VideoResolution Resolution,
     AudioFormat AudioFormat,
-    AudioBitrate Bitrate)
+    AudioBitrate Bitrate,
+    ProcessingOptions Processing)
 {
-    /// <summary>App default: 1080p MP4 video.</summary>
+    /// <summary>App default: 1080p MP4 video with metadata + thumbnail embedding.</summary>
     public static DownloadConfig Default { get; } =
-        new(OutputKind.Video, VideoContainer.Mp4, VideoResolution.P1080, AudioFormat.Mp3, AudioBitrate.Best);
+        new(OutputKind.Video, VideoContainer.Mp4, VideoResolution.P1080, AudioFormat.Mp3, AudioBitrate.Best,
+            ProcessingOptions.Default);
 }

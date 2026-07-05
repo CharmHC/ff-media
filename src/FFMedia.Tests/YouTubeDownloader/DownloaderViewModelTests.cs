@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading;
@@ -141,5 +142,60 @@ public class DownloaderViewModelTests
         vm.SelectedKind = OutputKind.Audio;
         Assert.True(vm.IsAudio);
         Assert.False(vm.IsVideo);
+    }
+
+    [Fact]
+    public async Task AddToQueue_AssemblesProcessingOptions_FromSelections()
+    {
+        var mgr = new FakeManager();
+        var vm = Vm(new FakePlaylistProbe(), mgr);
+        vm.Url = "https://u";
+        vm.TrimStart = "0:05";
+        vm.TrimEnd = "0:10";
+        vm.PreciseCut = true;
+        vm.EmbedSubtitles = true;
+        vm.SubtitleLanguage = "es";
+        vm.EmbedMetadata = false;
+        vm.EmbedThumbnail = false;
+
+        await vm.AddToQueueCommand.ExecuteAsync(null);
+
+        var p = Assert.Single(mgr.Enqueued).Config.Processing;
+        Assert.Equal(new TrimRange(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)), p.Trim);
+        Assert.True(p.PreciseCut);
+        Assert.True(p.EmbedSubtitles);
+        Assert.Equal("es", p.SubtitleLanguage);
+        Assert.False(p.EmbedMetadata);
+        Assert.False(p.EmbedThumbnail);
+    }
+
+    [Fact]
+    public async Task AddToQueue_BlankTrim_ProducesNoTrim()
+    {
+        var mgr = new FakeManager();
+        var vm = Vm(new FakePlaylistProbe(), mgr);
+        vm.Url = "https://u";
+        await vm.AddToQueueCommand.ExecuteAsync(null);
+        Assert.Null(Assert.Single(mgr.Enqueued).Config.Processing.Trim);
+    }
+
+    [Fact]
+    public void InvalidTrim_SetsHint_BlankClearsIt()
+    {
+        var vm = Vm(new FakePlaylistProbe(), new FakeManager());
+        vm.TrimStart = "abc";
+        vm.TrimEnd = "0:10";
+        Assert.NotEqual(string.Empty, vm.TrimHint);
+        vm.TrimStart = string.Empty;
+        vm.TrimEnd = string.Empty;
+        Assert.Equal(string.Empty, vm.TrimHint);
+    }
+
+    [Fact]
+    public void EmbedDefaults_MetadataAndThumbnailOn()
+    {
+        var vm = Vm(new FakePlaylistProbe(), new FakeManager());
+        Assert.True(vm.EmbedMetadata);
+        Assert.True(vm.EmbedThumbnail);
     }
 }

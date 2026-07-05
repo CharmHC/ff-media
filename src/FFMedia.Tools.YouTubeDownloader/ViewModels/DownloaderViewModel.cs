@@ -51,6 +51,30 @@ public partial class DownloaderViewModel : ObservableObject
         OnPropertyChanged(nameof(IsAudio));
     }
 
+    [ObservableProperty] private string _trimStart = string.Empty;
+    [ObservableProperty] private string _trimEnd = string.Empty;
+    [ObservableProperty] private bool _preciseCut;
+    [ObservableProperty] private bool _embedSubtitles;
+    [ObservableProperty] private string _subtitleLanguage = "en";
+    [ObservableProperty] private bool _embedMetadata = true;
+    [ObservableProperty] private bool _embedThumbnail = true;
+    [ObservableProperty] private string _trimHint = string.Empty;
+
+    partial void OnTrimStartChanged(string value) => UpdateTrimHint();
+    partial void OnTrimEndChanged(string value) => UpdateTrimHint();
+
+    private void UpdateTrimHint()
+    {
+        var requested = !(string.IsNullOrWhiteSpace(TrimStart) && string.IsNullOrWhiteSpace(TrimEnd));
+        TrimHint = requested && TrimParsing.ParseRange(TrimStart, TrimEnd) is null
+            ? "Enter valid Start/End (HH:MM:SS or seconds), End after Start."
+            : string.Empty;
+    }
+
+    private ProcessingOptions BuildProcessing() => new(
+        TrimParsing.ParseRange(TrimStart, TrimEnd),
+        PreciseCut, EmbedSubtitles, SubtitleLanguage, EmbedMetadata, EmbedThumbnail);
+
     [RelayCommand]
     private async Task AddToQueueAsync()
     {
@@ -60,7 +84,8 @@ public partial class DownloaderViewModel : ObservableObject
         try
         {
             var config = new DownloadConfig(
-                SelectedKind, SelectedContainer, SelectedResolution, SelectedAudioFormat, SelectedBitrate);
+                SelectedKind, SelectedContainer, SelectedResolution, SelectedAudioFormat, SelectedBitrate,
+                BuildProcessing());
 
             var result = await _playlistProbe.ExpandAsync(Url, CancellationToken.None);
             if (!result.IsSuccess)

@@ -40,6 +40,28 @@
                 <ComboBox ItemsSource="{Binding Bitrates}" SelectedItem="{Binding SelectedBitrate}" Width="100" />
             </StackPanel>
 
+            <StackPanel Margin="0,16,0,0">
+                <TextBlock Text="Processing" FontWeight="SemiBold" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="Trim start:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ui:TextBox Text="{Binding TrimStart, UpdateSourceTrigger=PropertyChanged}" Width="90" PlaceholderText="0:00" />
+                    <TextBlock Text="end:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                    <ui:TextBox Text="{Binding TrimEnd, UpdateSourceTrigger=PropertyChanged}" Width="90" PlaceholderText="1:30" />
+                    <CheckBox Content="Precise cut" IsChecked="{Binding PreciseCut}" Margin="16,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="{Binding TrimHint}" Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                           Margin="0,4,0,0" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <CheckBox Content="Embed subtitles" IsChecked="{Binding EmbedSubtitles}" VerticalAlignment="Center" />
+                    <TextBlock Text="Language:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                    <ui:TextBox Text="{Binding SubtitleLanguage}" Width="60" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <CheckBox Content="Embed metadata" IsChecked="{Binding EmbedMetadata}" Margin="0,0,16,0" />
+                    <CheckBox Content="Embed thumbnail" IsChecked="{Binding EmbedThumbnail}" />
+                </StackPanel>
+            </StackPanel>
+
             <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                 <ui:Button Content="Add to queue" Appearance="Primary" Command="{Binding AddToQueueCommand}" />
                 <ui:Button Content="Cancel all" Command="{Binding CancelAllCommand}" Margin="8,0,0,0" />

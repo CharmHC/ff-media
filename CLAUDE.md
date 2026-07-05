@@ -33,6 +33,29 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-05 — M4 Processing
+
+- **Done:** `ProcessingOptions` (`TrimRange?` Trim, `PreciseCut`, `EmbedSubtitles`,
+  `SubtitleLanguage`, `EmbedMetadata`, `EmbedThumbnail`; default metadata+thumbnail ON,
+  subs+trim off, language "en") added to `DownloadConfig.Processing`. Pure
+  `OptionSetBuilder.ApplyProcessing` emits: trim → `--download-sections "*<start>-<end>"`
+  (keyframe-fast), `PreciseCut` additionally emits `--force-keyframes-at-cuts`; subtitles
+  **video-only** → `--write-subs --write-auto-subs --embed-subs --sub-langs <lang>`;
+  `--embed-metadata`/`--embed-thumbnail` from the flags. Pure `TrimParsing` parses
+  HH:MM:SS / MM:SS / seconds into a `TimeSpan`, producing a range only when both ends
+  parse and End > Start. `DownloaderViewModel` gained processing selections (+ live
+  `TrimHint` validation) that assemble `ProcessingOptions` per job; the page gained a
+  "Processing" section (trim start/end + precise cut, embed subtitles + language, embed
+  metadata/thumbnail). All processing flows per-job through the M3 queue. SDD synced to
+  v0.6 (§7.3 processing flags, §8 trim-via-yt-dlp note, §17 M4 row).
+- **Decisions:** precise-cut is a per-download toggle (not global); subtitles are
+  video-only (ignored for audio downloads); metadata + thumbnail default ON; embedding a
+  thumbnail is container-dependent — works for mp4/mkv/mp3/m4a, yt-dlp warns (but still
+  proceeds) for webm/opus; trim uses yt-dlp's own `--download-sections` rather than a
+  post-download `FFMedia.Media`/FFMpegCore pass — the FFMpegCore trim wrapper stays
+  reserved for future tools that need frame-accurate cutting independent of yt-dlp.
+- **Next:** M5 — settings, presets, history, notifications, dark/light theming.
+
 ### 2026-07-05 — M3 Queue
 
 - **Done:** Download queue engine in `FFMedia.Tools.YouTubeDownloader`: `DownloadJob`

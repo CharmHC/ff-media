@@ -12,9 +12,11 @@ public static class OptionSetBuilder
     public static OptionSet Build(DownloadConfig config, string outputFolder)
     {
         var output = Path.Combine(outputFolder, "%(title)s.%(ext)s");
-        return config.Kind == OutputKind.Audio
+        var options = config.Kind == OutputKind.Audio
             ? BuildAudio(config, output)
             : BuildVideo(config, output);
+        ApplyProcessing(options, config);
+        return options;
     }
 
     private static OptionSet BuildVideo(DownloadConfig config, string output)
@@ -67,6 +69,32 @@ public static class OptionSetBuilder
 
         return options;
     }
+
+    private static void ApplyProcessing(OptionSet options, DownloadConfig config)
+    {
+        var p = config.Processing;
+
+        if (p.Trim is { } trim)
+        {
+            options.DownloadSections = $"*{FormatSeconds(trim.Start)}-{FormatSeconds(trim.End)}";
+            if (p.PreciseCut) options.ForceKeyframesAtCuts = true;
+        }
+
+        // Subtitles only apply to video output.
+        if (config.Kind == OutputKind.Video && p.EmbedSubtitles)
+        {
+            options.WriteSubs = true;
+            options.WriteAutoSubs = true;
+            options.EmbedSubs = true;
+            options.SubLangs = p.SubtitleLanguage;
+        }
+
+        options.EmbedMetadata = p.EmbedMetadata;
+        options.EmbedThumbnail = p.EmbedThumbnail;
+    }
+
+    private static string FormatSeconds(TimeSpan t) =>
+        t.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static string HeightFilter(VideoResolution r) => r switch
     {

@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.5 · **Last updated:** 2026-07-05
+> **Status:** Living document · **Version:** 0.6 · **Last updated:** 2026-07-05
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -221,8 +221,10 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
 5. **Run** — a worker builds a yt-dlp `OptionSet` from the config, executes via
    `YoutubeDLSharp`, forwards `Progress<DownloadProgress>` to the ViewModel, and
    passes the job's `CancellationToken`.
-6. **Post-process** — yt-dlp performs recode / audio-extract / embed. Standalone
-   trim (if the user asked for a clip without re-encode) uses `FFMedia.Media`.
+6. **Post-process** — yt-dlp performs recode / audio-extract / trim / subtitle &
+   metadata/thumbnail embed. Trim is realized via yt-dlp `--download-sections`
+   (`--force-keyframes-at-cuts` for precise cuts); the `FFMedia.Media` FFMpegCore trim
+   wrapper is reserved for future tools (see §8).
 7. **Complete** — notify, write to history, expose "Open folder" / "Open file".
 
 ### 7.2 Job state machine
@@ -256,7 +258,7 @@ Queued ─▶ Downloading ─▶ Processing ─▶ Completed
 The `OptionSet` builder is a **pure function** `DownloadConfig → yt-dlp args`
 (heavily unit-tested). Representative mappings:
 
-| User choice | yt-dlp options produced (M2, via `OptionSetBuilder`) |
+| User choice | yt-dlp options produced (M2/M4, via `OptionSetBuilder`) |
 |---|---|
 | MP4, cap ≤N | `-f "bv*[height<=N][ext=mp4]+ba[ext=m4a]/b[height<=N][ext=mp4]/bv*[height<=N]+ba/b[height<=N]" --merge-output-format mp4` |
 | MP4, Best | as above without any `[height<=N]` filter |
@@ -265,11 +267,21 @@ The `OptionSet` builder is a **pure function** `DownloadConfig → yt-dlp args`
 | Audio MP3/M4A/Opus | `-x --audio-format <fmt> -f "ba/b"` (+ `--audio-quality <n>K` when a specific bitrate is chosen) |
 | Audio WAV/FLAC | `-x --audio-format <fmt> -f "ba/b"` (lossless — bitrate ignored) |
 | All | `--no-playlist -o "<folder>/%(title)s.%(ext)s"` |
+| Trim (fast) | `--download-sections "*<start>-<end>"` (seconds; keyframe cut, no re-encode) |
+| Trim (precise) | as above + `--force-keyframes-at-cuts` (exact, re-encodes around the cut) |
+| Subtitles (video only) | `--write-subs --write-auto-subs --embed-subs --sub-langs <lang>` |
+| Embed metadata | `--embed-metadata` |
+| Embed thumbnail | `--embed-thumbnail` (mp4/mkv/mp3/m4a; yt-dlp warns and proceeds for webm/opus) |
 
 > **M2 decisions:** downloads **mux** into the container via `--merge-output-format` (no
 > re-encode; M1's `--recode-video` was dropped). Resolution is a **cap** (`[height<=N]`), not a
 > per-video format-list selection. Audio bitrate is emitted via `OptionSet.AddCustomOption`
 > ("--audio-quality") because the typed `AudioQuality` is the 0–10 VBR scale, not a bitrate.
+
+> **M4 note:** processing (trim, subtitles, metadata, thumbnail) is applied **per-download** via
+> `DownloadConfig.Processing` (`ProcessingOptions`) through `OptionSetBuilder.ApplyProcessing`,
+> a pure function alongside `Build`. Subtitles are emitted **only for video output** (`OutputKind.Video`) —
+> ignored for audio-only downloads.
 
 ---
 
@@ -283,6 +295,12 @@ directly (as opposed to delegating to yt-dlp):
 - **Foundation for future tools** (standardize resolution/FPS/format, concat/merge).
 
 `FFMedia.Media` locates `ffmpeg.exe` through `IBinaryProvider` (no PATH assumption).
+
+> **M4 note:** the YouTube Downloader's trim/clip feature (§7.3) is realized via yt-dlp's
+> own `--download-sections` (+ `--force-keyframes-at-cuts` for a precise cut) rather than a
+> post-download `FFMedia.Media` pass — it's simpler and avoids a redundant re-encode. The
+> `FFMpegCore`-backed trim wrapper described above stays a reserved foundation for future
+> tools that need frame-accurate cutting independent of yt-dlp.
 
 ---
 
@@ -423,7 +441,7 @@ Each milestone is a **vertical, shippable increment**.
 | **M1** | Vertical slice | ✅ delivered (branch `feat/m1-vertical-slice`) — Paste URL → probe → download single **MP4** with **live progress + cancel**. End-to-end through all layers. |
 | **M2** | Formats | ✅ delivered (branch `feat/m2-formats`) — Full format matrix: video containers + audio-only (**wav/mp3**/m4a/opus/flac) + quality/resolution. `OptionSet` builder fully tested. |
 | **M3** | Queue | ✅ delivered (branch `feat/m3-queue`) — Download **queue** (`IDownloadManager`/`DownloadJob`, module-owned) with bounded **concurrency** (`SemaphoreSlim` cap 3), transient-only retry with exponential backoff, and **playlist/channel** expansion at add-time (one job per entry). |
-| **M4** | Processing | **Trim/clip**, **subtitles**, **metadata + thumbnail** embedding. |
+| **M4** | Processing | ✅ delivered (branch `feat/m4-processing`) — **Trim/clip** (fast keyframe cut or precise re-encode), **subtitles** (video-only, manual + auto), **metadata + thumbnail** embedding. |
 | **M5** | Experience | **Settings**, **presets**, **history**, **notifications**, dark/light **theming**. |
 | **M6** | Ship v1 | **Velopack** installer + delta auto-update, yt-dlp/ffmpeg update flow, **v1 release**. |
 | **M7** | *(future)* | Second tool module (video **standardize/merge**) — validates the modular seam. |
@@ -467,6 +485,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-05 | 0.6 | M4 processing: `ProcessingOptions` (`TrimRange?`/`PreciseCut`/`EmbedSubtitles`/`SubtitleLanguage`/`EmbedMetadata`/`EmbedThumbnail`, default metadata+thumbnail on) added to `DownloadConfig.Processing`; pure `OptionSetBuilder.ApplyProcessing` emits `--download-sections` (+ `--force-keyframes-at-cuts` when precise), video-only `--write-subs --write-auto-subs --embed-subs --sub-langs`, and `--embed-metadata`/`--embed-thumbnail`; pure `TrimParsing` (HH:MM:SS/MM:SS/seconds → `TimeSpan`, range only when valid). ViewModel gained processing selections + live trim-hint validation; page gained a Processing section. §7.3/§8/§17 updated to match. |
 | 2026-07-05 | 0.5 | M3 queue: `IDownloadManager`/`DownloadJob` (module-owned, not Core) run a bounded-concurrency (`SemaphoreSlim` cap 3) download queue with auto-start on add, per-job + cancel-all cancellation, and clear-completed; `RetryPolicy` retries transient network failures with exponential backoff (3 attempts/1s base) while permanent errors fail fast; `IPlaylistProbe`/`PlaylistMapping` expand a playlist/channel URL into one job per entry at add-time. ViewModel restructured to add-to-queue with a bound `Jobs` list; page shows per-job progress/cancel + cancel-all/clear-completed. §6/§7.2/§12/§19 updated to match the realized design; §19 concurrency + pause/resume resolved. |
 | 2026-07-05 | 0.4 | M2 formats: full matrix via pure `OptionSetBuilder` — video (MP4/MKV/WebM) at a resolution cap + audio-only (MP3/WAV/M4A/Opus/FLAC) with bitrate; `DownloadConfig` model; ViewModel selections + page dropdowns; §7.3 flags finalized (mux over recode, `--audio-quality` via custom option). |
 | 2026-07-05 | 0.3 | M1 vertical slice delivered: YouTube Downloader tool (probe + single-MP4 download w/ live progress + cancel) via YoutubeDLSharp; module + tests retargeted to `net9.0-windows` (UseWPF); `IMediaProbe`/`IDownloadService` seam with a unit-tested `DownloaderViewModel` (fakes) + trait-gated yt-dlp integration test; shell nav wiring joins `ITool` + `IToolPage` (WPF-UI navigation); added `Result<T>` and `IToolPage` to Core. |
