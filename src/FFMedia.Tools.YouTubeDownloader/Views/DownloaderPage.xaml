@@ -5,45 +5,76 @@
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     </Page.Resources>
-    <StackPanel Margin="24" MaxWidth="720">
-        <TextBlock Text="YouTube Downloader" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Text="Paste a URL, probe it, choose a format, then download." Opacity="0.8" Margin="0,4,0,16" />
+    <Grid Margin="24" MaxWidth="820">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <ui:TextBox PlaceholderText="https://www.youtube.com/watch?v=…"
-                    Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}" />
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="YouTube Downloader" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Text="Paste a URL (video, playlist, or channel), choose a format, then add it to the queue."
+                       Opacity="0.8" Margin="0,4,0,16" />
 
-        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-            <ui:Button Content="Probe" Command="{Binding ProbeCommand}" />
-            <ui:Button Content="Download" Command="{Binding DownloadCommand}" Margin="8,0,0,0" />
-            <ui:Button Content="Cancel" Command="{Binding CancelCommand}" Margin="8,0,0,0" />
+            <ui:TextBox PlaceholderText="https://www.youtube.com/watch?v=…"
+                        Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <TextBlock Text="Output:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox ItemsSource="{Binding Kinds}" SelectedItem="{Binding SelectedKind}" Width="120" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                        Visibility="{Binding IsVideo, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Container:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}" Width="100" />
+                <TextBlock Text="Resolution:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                <ComboBox ItemsSource="{Binding Resolutions}" SelectedItem="{Binding SelectedResolution}" Width="100" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                        Visibility="{Binding IsAudio, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Format:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox ItemsSource="{Binding AudioFormats}" SelectedItem="{Binding SelectedAudioFormat}" Width="100" />
+                <TextBlock Text="Bitrate:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                <ComboBox ItemsSource="{Binding Bitrates}" SelectedItem="{Binding SelectedBitrate}" Width="100" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                <ui:Button Content="Add to queue" Appearance="Primary" Command="{Binding AddToQueueCommand}" />
+                <ui:Button Content="Cancel all" Command="{Binding CancelAllCommand}" Margin="8,0,0,0" />
+                <ui:Button Content="Clear completed" Command="{Binding ClearCompletedCommand}" Margin="8,0,0,0" />
+            </StackPanel>
+
+            <TextBlock Text="{Binding StatusMessage}" Opacity="0.8" Margin="0,8,0,0" TextWrapping="Wrap" />
         </StackPanel>
 
-        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-            <TextBlock Text="Output:" VerticalAlignment="Center" Margin="0,0,8,0" />
-            <ComboBox ItemsSource="{Binding Kinds}" SelectedItem="{Binding SelectedKind}" Width="120" />
-        </StackPanel>
-
-        <!-- Video options -->
-        <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
-                    Visibility="{Binding IsVideo, Converter={StaticResource BoolToVisibility}}">
-            <TextBlock Text="Container:" VerticalAlignment="Center" Margin="0,0,8,0" />
-            <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}" Width="100" />
-            <TextBlock Text="Resolution:" VerticalAlignment="Center" Margin="16,0,8,0" />
-            <ComboBox ItemsSource="{Binding Resolutions}" SelectedItem="{Binding SelectedResolution}" Width="100" />
-        </StackPanel>
-
-        <!-- Audio options -->
-        <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
-                    Visibility="{Binding IsAudio, Converter={StaticResource BoolToVisibility}}">
-            <TextBlock Text="Format:" VerticalAlignment="Center" Margin="0,0,8,0" />
-            <ComboBox ItemsSource="{Binding AudioFormats}" SelectedItem="{Binding SelectedAudioFormat}" Width="100" />
-            <TextBlock Text="Bitrate:" VerticalAlignment="Center" Margin="16,0,8,0" />
-            <ComboBox ItemsSource="{Binding Bitrates}" SelectedItem="{Binding SelectedBitrate}" Width="100" />
-        </StackPanel>
-
-        <TextBlock Text="{Binding MediaTitle}" FontWeight="SemiBold" Margin="0,16,0,0" />
-        <ProgressBar Value="{Binding Progress}" Maximum="100" Height="6" Margin="0,8,0,0" />
-        <TextBlock Text="{Binding ProgressText}" Opacity="0.8" Margin="0,8,0,0" TextWrapping="Wrap" />
-        <TextBlock Text="{Binding StatusMessage}" Opacity="0.8" Margin="0,4,0,0" TextWrapping="Wrap" />
-    </StackPanel>
+        <ItemsControl Grid.Row="1" Margin="0,16,0,0" ItemsSource="{Binding Jobs}"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Padding="12" Margin="0,0,0,8" CornerRadius="6"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <ProgressBar Value="{Binding Progress}" Maximum="100" Height="6" Margin="0,6,0,0" />
+                                <TextBlock Text="{Binding ProgressText}" Opacity="0.75" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding Status}" Opacity="0.6" Margin="0,2,0,0" />
+                                <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                           TextWrapping="Wrap" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <ui:Button Grid.Column="1" Content="Cancel" VerticalAlignment="Top" Margin="12,0,0,0"
+                                       Command="{Binding DataContext.CancelJobCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                       CommandParameter="{Binding}" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </Grid>
 </Page>
