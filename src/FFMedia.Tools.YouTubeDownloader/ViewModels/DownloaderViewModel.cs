@@ -85,7 +85,7 @@ public partial class DownloaderViewModel : ObservableObject
         try
         {
             var result = await _download.DownloadAsync(
-                new DownloadRequest(Url, OutputFolder), progress, _cts.Token);
+                new DownloadRequest(Url, OutputFolder, DownloadConfig.Default), progress, _cts.Token);
             StatusMessage = result.IsSuccess
                 ? $"Saved to {result.Value}"
                 : result.Error ?? "Download failed";

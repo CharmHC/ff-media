@@ -47,7 +47,7 @@ public class YtDlpIntegrationTests
             var updates = new List<DownloadUpdate>();
             var progress = new Progress<DownloadUpdate>(updates.Add);
 
-            var result = await svc.DownloadAsync(new DownloadRequest(TestUrl, outDir), progress, CancellationToken.None);
+            var result = await svc.DownloadAsync(new DownloadRequest(TestUrl, outDir, DownloadConfig.Default), progress, CancellationToken.None);
 
             Assert.True(result.IsSuccess, result.Error);
             Assert.NotEmpty(Directory.GetFiles(outDir, "*.mp4"));

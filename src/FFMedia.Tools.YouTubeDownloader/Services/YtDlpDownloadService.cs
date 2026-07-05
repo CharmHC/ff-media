@@ -24,7 +24,7 @@ public sealed class YtDlpDownloadService : IDownloadService
             ytdl.OutputFolder = request.OutputFolder;
 
             var innerProgress = new Progress<DownloadProgress>(p => progress.Report(ProgressMapping.ToUpdate(p)));
-            var options = DownloadOptions.Mp4(request.OutputFolder);
+            var options = OptionSetBuilder.Build(request.Config, request.OutputFolder);
 
             var res = await ytdl.RunVideoDownload(request.Url, progress: innerProgress, ct: ct, overrideOptions: options);
             return res.Success
