@@ -40,6 +40,27 @@ public partial class DownloaderViewModel : ObservableObject
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _outputFolder;
 
+    [ObservableProperty] private OutputKind _selectedKind = OutputKind.Video;
+    [ObservableProperty] private VideoContainer _selectedContainer = VideoContainer.Mp4;
+    [ObservableProperty] private VideoResolution _selectedResolution = VideoResolution.P1080;
+    [ObservableProperty] private AudioFormat _selectedAudioFormat = AudioFormat.Mp3;
+    [ObservableProperty] private AudioBitrate _selectedBitrate = AudioBitrate.Best;
+
+    public IReadOnlyList<OutputKind> Kinds { get; } = Enum.GetValues<OutputKind>();
+    public IReadOnlyList<VideoContainer> Containers { get; } = Enum.GetValues<VideoContainer>();
+    public IReadOnlyList<VideoResolution> Resolutions { get; } = Enum.GetValues<VideoResolution>();
+    public IReadOnlyList<AudioFormat> AudioFormats { get; } = Enum.GetValues<AudioFormat>();
+    public IReadOnlyList<AudioBitrate> Bitrates { get; } = Enum.GetValues<AudioBitrate>();
+
+    public bool IsVideo => SelectedKind == OutputKind.Video;
+    public bool IsAudio => SelectedKind == OutputKind.Audio;
+
+    partial void OnSelectedKindChanged(OutputKind value)
+    {
+        OnPropertyChanged(nameof(IsVideo));
+        OnPropertyChanged(nameof(IsAudio));
+    }
+
     [RelayCommand]
     private async Task ProbeAsync()
     {
@@ -84,8 +105,10 @@ public partial class DownloaderViewModel : ObservableObject
         });
         try
         {
+            var config = new DownloadConfig(
+                SelectedKind, SelectedContainer, SelectedResolution, SelectedAudioFormat, SelectedBitrate);
             var result = await _download.DownloadAsync(
-                new DownloadRequest(Url, OutputFolder, DownloadConfig.Default), progress, _cts.Token);
+                new DownloadRequest(Url, OutputFolder, config), progress, _cts.Token);
             StatusMessage = result.IsSuccess
                 ? $"Saved to {result.Value}"
                 : result.Error ?? "Download failed";
