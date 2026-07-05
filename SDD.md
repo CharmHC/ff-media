@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.4 · **Last updated:** 2026-07-05
+> **Status:** Living document · **Version:** 0.6 · **Last updated:** 2026-07-05
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -110,9 +110,9 @@ abstractions, and can be developed/tested in isolation.
        ▼
 ┌──────────────────────────────────────────────────────────┐
 │ FFMedia.Core  (UI-agnostic services & abstractions)      │
-│  ITool · IBinaryProvider · IJobQueue/DownloadManager ·   │
-│  ISettingsService · IHistoryService ·                    │
-│  INotificationService · IProcessRunner                   │
+│  ITool · IBinaryProvider · ISettingsService ·            │
+│  IHistoryService · INotificationService ·                │
+│  IProcessRunner                                          │
 ├──────────────────────────────────────────────────────────┤
 │ FFMedia.Media — FFMpegCore wrappers (shared)             │
 ├──────────────────────────────────────────────────────────┤
@@ -192,12 +192,18 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
 |---|---|
 | `IProcessRunner` | Launch a child process, stream stdout/stderr, honor `CancellationToken`. The seam that makes orchestration testable without real binaries. |
 | `IBinaryProvider` | Resolve/verify bundled `yt-dlp.exe` & `ffmpeg.exe` paths; report versions; trigger yt-dlp self-update. |
-| `IDownloadManager` / `IJobQueue` | Enqueue jobs, enforce bounded concurrency, expose observable job collection + per-job state. |
 | `ISettingsService` | Load/save app settings (JSON in `%AppData%\FFMedia`). |
 | `IPresetService` | CRUD saved download presets. |
 | `IHistoryService` | Append/query completed-download history. |
 | `INotificationService` | In-app snackbar/toast + optional Windows toast. |
 | `IErrorMapper` | Map raw yt-dlp/ffmpeg stderr to friendly, actionable messages. |
+
+> **M3 note:** the download queue (`IDownloadManager`/`DownloadJob`, plus `RetryPolicy`
+> and `IPlaylistProbe`) was **not** built in `FFMedia.Core` as originally sketched above.
+> It orchestrates the YouTube Downloader module's own `IMediaProbe`/`IDownloadService`,
+> so it lives in `FFMedia.Tools.YouTubeDownloader` instead (see §7 and §12). The generic
+> bounded-concurrency pattern (`SemaphoreSlim` cap + per-job `CancellationTokenSource`)
+> may be lifted into `FFMedia.Core` if a second tool needs the same shape — YAGNI for now.
 
 ---
 
@@ -215,30 +221,44 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
 5. **Run** — a worker builds a yt-dlp `OptionSet` from the config, executes via
    `YoutubeDLSharp`, forwards `Progress<DownloadProgress>` to the ViewModel, and
    passes the job's `CancellationToken`.
-6. **Post-process** — yt-dlp performs recode / audio-extract / embed. Standalone
-   trim (if the user asked for a clip without re-encode) uses `FFMedia.Media`.
+6. **Post-process** — yt-dlp performs recode / audio-extract / trim / subtitle &
+   metadata/thumbnail embed. Trim is realized via yt-dlp `--download-sections`
+   (`--force-keyframes-at-cuts` for precise cuts); the `FFMedia.Media` FFMpegCore trim
+   wrapper is reserved for future tools (see §8).
 7. **Complete** — notify, write to history, expose "Open folder" / "Open file".
 
 ### 7.2 Job state machine
 
+**M3-realized state machine** (`JobStatus`, `FFMedia.Tools.YouTubeDownloader`):
+
 ```
-Queued ─▶ Fetching ─▶ Downloading ─▶ Processing ─▶ Completed
-   │          │            │              │
-   └──────────┴────────────┴──────────────┴────▶ Canceled
-                            │
-                            └──────────────────▶ Failed  (+ retry on transient network)
+Queued ─▶ Downloading ─▶ Processing ─▶ Completed
+   │            │              │
+   └────────────┴──────────────┴────▶ Canceled
+                │
+                └──────────────────▶ Failed  (+ retry on transient network, same job)
 ```
 
-- **Failure isolation:** a failed/canceled job never stalls the queue.
-- **Retry policy:** transient network errors retried with backoff (configurable
-  max attempts); non-transient errors (private/removed/geo-blocked) fail fast.
+- **Fetching happens at add-time, before a job exists.** `IPlaylistProbe.ExpandAsync`
+  resolves a URL into one (`MediaEntry`) per video, or N for a playlist/channel, when
+  the user adds it. Each resolved entry becomes a `DownloadJob` (`Url`/`Title`/
+  `DownloadConfig`/`OutputFolder` already known) and is handed to `IDownloadManager`,
+  which is therefore a pure download engine over `Queued → Downloading → Processing →
+  {Completed | Canceled | Failed}` — no separate `Fetching` state inside the manager.
+- **Failure isolation:** each job runs in its own tracked task; a failed/canceled job
+  never stalls the queue or affects siblings.
+- **Retry policy (`RetryPolicy`):** transient network errors (timeout, connection
+  reset, 5xx, DNS failure, …) are retried **on the same job** with exponential backoff
+  (`baseDelay · 2^(attempt-1)`), default **3 attempts / 1s base**; non-transient errors
+  (private/removed/geo-blocked/etc.) fail fast with no retry. Classification is a pure,
+  unit-tested function (`RetryPolicy.IsTransient`); cancellation is never retried.
 
 ### 7.3 Output format matrix
 
 The `OptionSet` builder is a **pure function** `DownloadConfig → yt-dlp args`
 (heavily unit-tested). Representative mappings:
 
-| User choice | yt-dlp options produced (M2, via `OptionSetBuilder`) |
+| User choice | yt-dlp options produced (M2/M4, via `OptionSetBuilder`) |
 |---|---|
 | MP4, cap ≤N | `-f "bv*[height<=N][ext=mp4]+ba[ext=m4a]/b[height<=N][ext=mp4]/bv*[height<=N]+ba/b[height<=N]" --merge-output-format mp4` |
 | MP4, Best | as above without any `[height<=N]` filter |
@@ -247,11 +267,21 @@ The `OptionSet` builder is a **pure function** `DownloadConfig → yt-dlp args`
 | Audio MP3/M4A/Opus | `-x --audio-format <fmt> -f "ba/b"` (+ `--audio-quality <n>K` when a specific bitrate is chosen) |
 | Audio WAV/FLAC | `-x --audio-format <fmt> -f "ba/b"` (lossless — bitrate ignored) |
 | All | `--no-playlist -o "<folder>/%(title)s.%(ext)s"` |
+| Trim (fast) | `--download-sections "*<start>-<end>"` (seconds; keyframe cut, no re-encode) |
+| Trim (precise) | as above + `--force-keyframes-at-cuts` (exact, re-encodes around the cut) |
+| Subtitles (video only) | `--write-subs --write-auto-subs --embed-subs --sub-langs <lang>` |
+| Embed metadata | `--embed-metadata` |
+| Embed thumbnail | `--embed-thumbnail` (mp4/mkv/mp3/m4a; yt-dlp warns and proceeds for webm/opus) |
 
 > **M2 decisions:** downloads **mux** into the container via `--merge-output-format` (no
 > re-encode; M1's `--recode-video` was dropped). Resolution is a **cap** (`[height<=N]`), not a
 > per-video format-list selection. Audio bitrate is emitted via `OptionSet.AddCustomOption`
 > ("--audio-quality") because the typed `AudioQuality` is the 0–10 VBR scale, not a bitrate.
+
+> **M4 note:** processing (trim, subtitles, metadata, thumbnail) is applied **per-download** via
+> `DownloadConfig.Processing` (`ProcessingOptions`) through `OptionSetBuilder.ApplyProcessing`,
+> a pure function alongside `Build`. Subtitles are emitted **only for video output** (`OutputKind.Video`) —
+> ignored for audio-only downloads.
 
 ---
 
@@ -265,6 +295,12 @@ directly (as opposed to delegating to yt-dlp):
 - **Foundation for future tools** (standardize resolution/FPS/format, concat/merge).
 
 `FFMedia.Media` locates `ffmpeg.exe` through `IBinaryProvider` (no PATH assumption).
+
+> **M4 note:** the YouTube Downloader's trim/clip feature (§7.3) is realized via yt-dlp's
+> own `--download-sections` (+ `--force-keyframes-at-cuts` for a precise cut) rather than a
+> post-download `FFMedia.Media` pass — it's simpler and avoids a redundant re-encode. The
+> `FFMpegCore`-backed trim wrapper described above stays a reserved foundation for future
+> tools that need frame-accurate cutting independent of yt-dlp.
 
 ---
 
@@ -318,12 +354,28 @@ Schema changes carry a `version` field for forward migration.
 
 ## 12. Concurrency Model
 
-- `IDownloadManager` uses a bounded `System.Threading.Channels.Channel` +
-  `SemaphoreSlim` to cap simultaneous downloads (default configurable, e.g. 3).
-- Each job owns a `CancellationTokenSource`; "Cancel all" cancels the linked
-  parent token.
-- UI updates marshal to the dispatcher; long work runs off the UI thread.
-- `IProgress<T>` provides thread-safe progress reporting into ViewModels.
+**Realized in M3** (`DownloadManager`, `FFMedia.Tools.YouTubeDownloader`):
+
+- A single `SemaphoreSlim(maxConcurrency, maxConcurrency)` caps simultaneous
+  downloads — **default 3**, a constructor parameter with a `= 3` default (constant
+  for M3; user-configurable is deferred to M5, §19). No `Channel` is used: each
+  `Enqueue` starts a fire-and-forget tracked `Task` that awaits a slot, so "queued"
+  jobs are just tasks blocked on the semaphore rather than items sitting in a channel.
+- **Auto-start on add:** `Enqueue` adds the job (`Queued`) and immediately schedules
+  its run task; there is no separate "start" action.
+- Each `DownloadJob` owns its own `CancellationTokenSource`. `Cancel(job)` cancels one
+  job's token; `CancelAll()` cancels every non-terminal job's token individually (no
+  shared/linked parent token). A job canceled while still waiting for a slot never
+  acquires one and transitions straight to `Canceled`.
+- `IdleAsync()` gives a deterministic "all done" signal (completes when no job is
+  running or queued) — used by tests to avoid wall-clock sleeps, and available for
+  future "all done" UX.
+- Progress is reported **synchronously** on the calling (worker) thread via a small
+  `IProgress<T>` adapter (not the ThreadPool-posting `Progress<T>`), so a late
+  callback can never race past a job's terminal status. `DownloadJob`'s
+  `[ObservableProperty]` setters rely on WPF data binding's cross-thread
+  `PropertyChanged` marshaling to reach the UI; there is no separate dispatcher hop
+  in the manager itself.
 
 ---
 
@@ -388,8 +440,8 @@ Each milestone is a **vertical, shippable increment**.
 | **M0** | Foundation | ✅ delivered (branch `feat/m0-foundation`) — Repo + solution scaffold, `.gitignore`, CI build, `IBinaryProvider` + binary-fetch script, WPF-UI shell with empty `NavigationView`, DI/host wiring, Serilog. |
 | **M1** | Vertical slice | ✅ delivered (branch `feat/m1-vertical-slice`) — Paste URL → probe → download single **MP4** with **live progress + cancel**. End-to-end through all layers. |
 | **M2** | Formats | ✅ delivered (branch `feat/m2-formats`) — Full format matrix: video containers + audio-only (**wav/mp3**/m4a/opus/flac) + quality/resolution. `OptionSet` builder fully tested. |
-| **M3** | Queue | Download **queue**, bounded **concurrency**, **playlist/channel** support. |
-| **M4** | Processing | **Trim/clip**, **subtitles**, **metadata + thumbnail** embedding. |
+| **M3** | Queue | ✅ delivered (branch `feat/m3-queue`) — Download **queue** (`IDownloadManager`/`DownloadJob`, module-owned) with bounded **concurrency** (`SemaphoreSlim` cap 3), transient-only retry with exponential backoff, and **playlist/channel** expansion at add-time (one job per entry). |
+| **M4** | Processing | ✅ delivered (branch `feat/m4-processing`) — **Trim/clip** (fast keyframe cut or precise re-encode), **subtitles** (video-only, manual + auto), **metadata + thumbnail** embedding. |
 | **M5** | Experience | **Settings**, **presets**, **history**, **notifications**, dark/light **theming**. |
 | **M6** | Ship v1 | **Velopack** installer + delta auto-update, yt-dlp/ffmpeg update flow, **v1 release**. |
 | **M7** | *(future)* | Second tool module (video **standardize/merge**) — validates the modular seam. |
@@ -409,9 +461,12 @@ Each milestone is a **vertical, shippable increment**.
 
 ## 19. Open Questions
 
-- Final default concurrency value (start at 3, tune during M3).
+- ~~Final default concurrency value~~ — **resolved (M3):** default **3**, a constant
+  in `DownloadManager`; user-configurable concurrency is deferred to M5 (Settings).
 - History storage: stay JSON vs. move to SQLite — decide when history UX lands (M5).
-- Pause/resume of in-flight downloads: stretch goal, evaluate in M3.
+- ~~Pause/resume of in-flight downloads~~ — **resolved (M3): deferred.** M3 ships
+  cancel-only (per-job + cancel-all); pause/resume remains a stretch goal, revisit
+  post-v1 if there's demand.
 - Which yt-dlp/ffmpeg versions to pin for v1 — set during M2, record in §9.
 
 ---
@@ -430,6 +485,8 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-05 | 0.6 | M4 processing: `ProcessingOptions` (`TrimRange?`/`PreciseCut`/`EmbedSubtitles`/`SubtitleLanguage`/`EmbedMetadata`/`EmbedThumbnail`, default metadata+thumbnail on) added to `DownloadConfig.Processing`; pure `OptionSetBuilder.ApplyProcessing` emits `--download-sections` (+ `--force-keyframes-at-cuts` when precise), video-only `--write-subs --write-auto-subs --embed-subs --sub-langs`, and `--embed-metadata`/`--embed-thumbnail`; pure `TrimParsing` (HH:MM:SS/MM:SS/seconds → `TimeSpan`, range only when valid). ViewModel gained processing selections + live trim-hint validation; page gained a Processing section. §7.3/§8/§17 updated to match. |
+| 2026-07-05 | 0.5 | M3 queue: `IDownloadManager`/`DownloadJob` (module-owned, not Core) run a bounded-concurrency (`SemaphoreSlim` cap 3) download queue with auto-start on add, per-job + cancel-all cancellation, and clear-completed; `RetryPolicy` retries transient network failures with exponential backoff (3 attempts/1s base) while permanent errors fail fast; `IPlaylistProbe`/`PlaylistMapping` expand a playlist/channel URL into one job per entry at add-time. ViewModel restructured to add-to-queue with a bound `Jobs` list; page shows per-job progress/cancel + cancel-all/clear-completed. §6/§7.2/§12/§19 updated to match the realized design; §19 concurrency + pause/resume resolved. |
 | 2026-07-05 | 0.4 | M2 formats: full matrix via pure `OptionSetBuilder` — video (MP4/MKV/WebM) at a resolution cap + audio-only (MP3/WAV/M4A/Opus/FLAC) with bitrate; `DownloadConfig` model; ViewModel selections + page dropdowns; §7.3 flags finalized (mux over recode, `--audio-quality` via custom option). |
 | 2026-07-05 | 0.3 | M1 vertical slice delivered: YouTube Downloader tool (probe + single-MP4 download w/ live progress + cancel) via YoutubeDLSharp; module + tests retargeted to `net9.0-windows` (UseWPF); `IMediaProbe`/`IDownloadService` seam with a unit-tested `DownloaderViewModel` (fakes) + trait-gated yt-dlp integration test; shell nav wiring joins `ITool` + `IToolPage` (WPF-UI navigation); added `Result<T>` and `IToolPage` to Core. |
 | 2026-07-04 | 0.2 | M0 foundation delivered: solution skeleton, Core (`ITool`/`IToolRegistry`, `IBinaryProvider`, `AddFFMediaCore`), WPF-UI shell w/ Host+Serilog, fetch-binaries script, CI. `ITool.Icon` is now a string glyph (Core stays UI-agnostic); assertion library deferred (FluentAssertions v8 is paid); M0 uses plain xUnit `Assert`. WPF-UI resolved to 4.3.0. |
