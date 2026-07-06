@@ -1,6 +1,9 @@
 using FFMedia.Core.Binaries;
+using FFMedia.Core.Settings;
 using FFMedia.Core.Tools;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace FFMedia.Core;
 
@@ -8,13 +11,19 @@ namespace FFMedia.Core;
 public static class CoreServiceCollectionExtensions
 {
     /// <param name="binariesDirectory">Directory holding bundled yt-dlp.exe / ffmpeg.exe.</param>
-    public static IServiceCollection AddFFMediaCore(this IServiceCollection services, string binariesDirectory)
+    /// <param name="dataDirectory">Directory for persisted JSON (settings/presets/history), e.g. %AppData%\FFMedia.</param>
+    public static IServiceCollection AddFFMediaCore(
+        this IServiceCollection services, string binariesDirectory, string dataDirectory)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(binariesDirectory);
+        ArgumentNullException.ThrowIfNull(dataDirectory);
 
         services.AddSingleton<IToolRegistry, ToolRegistry>();
         services.AddSingleton<IBinaryProvider>(_ => new BundledBinaryProvider(binariesDirectory));
+        services.AddSingleton<ISettingsService>(sp => new SettingsService(
+            dataDirectory,
+            sp.GetService<ILogger<SettingsService>>() ?? NullLogger<SettingsService>.Instance));
         return services;
     }
 }

@@ -20,7 +20,7 @@ public class CoreServiceCollectionExtensionsTests
         var provider = new ServiceCollection()
             .AddSingleton<ITool>(new FakeTool("z", "Zeta", 20))
             .AddSingleton<ITool>(new FakeTool("a", "Alpha", 10))
-            .AddFFMediaCore(binariesDirectory: Path.GetTempPath())
+            .AddFFMediaCore(binariesDirectory: Path.GetTempPath(), dataDirectory: Path.GetTempPath())
             .BuildServiceProvider();
 
         var registry = provider.GetRequiredService<IToolRegistry>();
@@ -33,11 +33,23 @@ public class CoreServiceCollectionExtensionsTests
     {
         var dir = Path.GetTempPath();
         var provider = new ServiceCollection()
-            .AddFFMediaCore(binariesDirectory: dir)
+            .AddFFMediaCore(binariesDirectory: dir, dataDirectory: Path.GetTempPath())
             .BuildServiceProvider();
 
         var binaries = provider.GetRequiredService<IBinaryProvider>();
 
         Assert.Equal(Path.Combine(dir, "yt-dlp.exe"), binaries.GetPath(ExternalBinary.YtDlp));
+    }
+
+    [Fact]
+    public void AddFFMediaCore_ResolvesSettingsService()
+    {
+        var provider = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: Path.GetTempPath(), dataDirectory: Path.GetTempPath())
+            .BuildServiceProvider();
+
+        var settings = provider.GetRequiredService<FFMedia.Core.Settings.ISettingsService>();
+
+        Assert.Equal(3, settings.Current.MaxConcurrency); // default when no file exists
     }
 }

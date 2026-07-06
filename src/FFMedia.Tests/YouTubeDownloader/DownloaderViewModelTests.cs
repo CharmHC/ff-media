@@ -37,7 +37,16 @@ public class DownloaderViewModelTests
         public Task IdleAsync() => Task.CompletedTask;
     }
 
-    private static DownloaderViewModel Vm(FakePlaylistProbe probe, FakeManager mgr) => new(probe, mgr);
+    private sealed class FakeSettings : FFMedia.Core.Settings.ISettingsService
+    {
+        public FFMedia.Core.Settings.AppSettings Current { get; private set; } =
+            FFMedia.Core.Settings.AppSettings.Default with { DefaultOutputFolder = @"C:\seeded" };
+        public void Save(FFMedia.Core.Settings.AppSettings settings) => Current = settings;
+        public event EventHandler<FFMedia.Core.Settings.AppSettings>? Changed { add { } remove { } }
+    }
+
+    private static DownloaderViewModel Vm(FakePlaylistProbe probe, FakeManager mgr) =>
+        new(probe, mgr, new FakeSettings());
 
     [Fact]
     public async Task AddToQueue_SingleEntry_EnqueuesOneJobWithSelectedConfig()
@@ -197,5 +206,12 @@ public class DownloaderViewModelTests
         var vm = Vm(new FakePlaylistProbe(), new FakeManager());
         Assert.True(vm.EmbedMetadata);
         Assert.True(vm.EmbedThumbnail);
+    }
+
+    [Fact]
+    public void OutputFolder_SeededFromSettings()
+    {
+        var vm = Vm(new FakePlaylistProbe(), new FakeManager());
+        Assert.Equal(@"C:\seeded", vm.OutputFolder);
     }
 }

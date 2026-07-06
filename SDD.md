@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.6 · **Last updated:** 2026-07-05
+> **Status:** Living document · **Version:** 0.7 · **Last updated:** 2026-07-06
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -205,6 +205,11 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
 > bounded-concurrency pattern (`SemaphoreSlim` cap + per-job `CancellationTokenSource`)
 > may be lifted into `FFMedia.Core` if a second tool needs the same shape — YAGNI for now.
 
+> **M5 PR 1 note:** `ISettingsService` is now **realized** in `FFMedia.Core` — a
+> JSON-backed `SettingsService` (built on a generic `JsonStore<T>`) persists
+> `AppSettings` to `%AppData%\FFMedia\settings.json`. `IPresetService`, `IHistoryService`,
+> and `INotificationService` remain **planned**, targeted for M5 PR 2.
+
 ---
 
 ## 7. YouTube Downloader Module (detailed)
@@ -335,6 +340,11 @@ All under `%AppData%\FFMedia\`:
 
 Schema changes carry a `version` field for forward migration.
 
+> **M5 PR 1 note:** `settings.json` now exists, written by the generic `JsonStore<T>`
+> (atomic temp-file write + corrupt-file quarantine to `.bak`, defaulting on read
+> failure). `AppSettings` carries a `Version` field for forward migration, per the
+> convention above.
+
 ---
 
 ## 11. Error Handling & Logging
@@ -357,10 +367,13 @@ Schema changes carry a `version` field for forward migration.
 **Realized in M3** (`DownloadManager`, `FFMedia.Tools.YouTubeDownloader`):
 
 - A single `SemaphoreSlim(maxConcurrency, maxConcurrency)` caps simultaneous
-  downloads — **default 3**, a constructor parameter with a `= 3` default (constant
-  for M3; user-configurable is deferred to M5, §19). No `Channel` is used: each
-  `Enqueue` starts a fire-and-forget tracked `Task` that awaits a slot, so "queued"
-  jobs are just tasks blocked on the semaphore rather than items sitting in a channel.
+  downloads — **default 3**, a constructor parameter with a `= 3` default. **M5 PR 1:**
+  the app composition root now reads `MaxConcurrency` from `ISettingsService` and passes
+  it into `DownloadManager`'s constructor at launch, so the cap is user-configurable via
+  the Settings screen (§13); it is applied once at construction, not re-tuned live while
+  the app is running. No `Channel` is used: each `Enqueue` starts a fire-and-forget
+  tracked `Task` that awaits a slot, so "queued" jobs are just tasks blocked on the
+  semaphore rather than items sitting in a channel.
 - **Auto-start on add:** `Enqueue` adds the job (`Queued`) and immediately schedules
   its run task; there is no separate "start" action.
 - Each `DownloadJob` owns its own `CancellationTokenSource`. `Cancel(job)` cancels one
@@ -393,6 +406,12 @@ Schema changes carry a `version` field for forward migration.
   versions + "Update yt-dlp".
 - **History screen:** searchable list with "open file/folder" and "re-download".
 - Accessibility: keyboard navigation, sufficient contrast in both themes.
+
+> **M5 PR 1 note:** the **Settings screen** now exists (footer nav item) with default
+> output folder, max concurrency, and theme controls, backed by `ISettingsService`.
+> A **title-bar theme toggle** (light/dark/system, via WPF-UI `ApplicationThemeManager`)
+> also now exists and applies the persisted theme at startup. Update cadence and binary
+> version display remain planned (M5 PR 2 / M6).
 
 ---
 
@@ -442,7 +461,7 @@ Each milestone is a **vertical, shippable increment**.
 | **M2** | Formats | ✅ delivered (branch `feat/m2-formats`) — Full format matrix: video containers + audio-only (**wav/mp3**/m4a/opus/flac) + quality/resolution. `OptionSet` builder fully tested. |
 | **M3** | Queue | ✅ delivered (branch `feat/m3-queue`) — Download **queue** (`IDownloadManager`/`DownloadJob`, module-owned) with bounded **concurrency** (`SemaphoreSlim` cap 3), transient-only retry with exponential backoff, and **playlist/channel** expansion at add-time (one job per entry). |
 | **M4** | Processing | ✅ delivered (branch `feat/m4-processing`) — **Trim/clip** (fast keyframe cut or precise re-encode), **subtitles** (video-only, manual + auto), **metadata + thumbnail** embedding. |
-| **M5** | Experience | **Settings**, **presets**, **history**, **notifications**, dark/light **theming**. |
+| **M5** | Experience | 🚧 in progress (branch `feat/m5-foundation`) — **PR 1 delivered:** settings persistence + theming foundation (`JsonStore<T>`, `ISettingsService`, Settings screen, dark/light/system theming). **PR 2 (planned):** presets, history, notifications. |
 | **M6** | Ship v1 | **Velopack** installer + delta auto-update, yt-dlp/ffmpeg update flow, **v1 release**. |
 | **M7** | *(future)* | Second tool module (video **standardize/merge**) — validates the modular seam. |
 
@@ -461,9 +480,11 @@ Each milestone is a **vertical, shippable increment**.
 
 ## 19. Open Questions
 
-- ~~Final default concurrency value~~ — **resolved (M3):** default **3**, a constant
-  in `DownloadManager`; user-configurable concurrency is deferred to M5 (Settings).
-- History storage: stay JSON vs. move to SQLite — decide when history UX lands (M5).
+- ~~Final default concurrency value~~ — **resolved (M3, refined M5 PR 1):** default
+  **3**, a constructor parameter on `DownloadManager`; user-configurable via the
+  Settings screen, read from `ISettingsService` at app launch.
+- ~~History storage: stay JSON vs. move to SQLite~~ — **resolved (M5 spec):** **JSON**
+  (`history.json`, per §10); revisit only if it grows large enough to warrant SQLite.
 - ~~Pause/resume of in-flight downloads~~ — **resolved (M3): deferred.** M3 ships
   cancel-only (per-job + cancel-all); pause/resume remains a stretch goal, revisit
   post-v1 if there's demand.
@@ -485,6 +506,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-06 | 0.7 | M5 foundation (PR 1): generic `JsonStore<T>` (atomic write, corrupt-file quarantine) + `AppSettings`/`ISettingsService` (JSON at %AppData%\FFMedia\settings.json). `AddFFMediaCore` gains a `dataDirectory` param and registers `ISettingsService`. App gains a `ThemeService` (dark/light/system via WPF-UI), a Settings screen (default folder, max concurrency, theme) as a footer nav item, a title-bar theme toggle, and applies the persisted theme at startup. Settings wired into behavior: downloader output folder seeded from settings; `DownloadManager` concurrency cap read from settings. §6/§10/§12/§13/§17/§19 updated. |
 | 2026-07-05 | 0.6 | M4 processing: `ProcessingOptions` (`TrimRange?`/`PreciseCut`/`EmbedSubtitles`/`SubtitleLanguage`/`EmbedMetadata`/`EmbedThumbnail`, default metadata+thumbnail on) added to `DownloadConfig.Processing`; pure `OptionSetBuilder.ApplyProcessing` emits `--download-sections` (+ `--force-keyframes-at-cuts` when precise), video-only `--write-subs --write-auto-subs --embed-subs --sub-langs`, and `--embed-metadata`/`--embed-thumbnail`; pure `TrimParsing` (HH:MM:SS/MM:SS/seconds → `TimeSpan`, range only when valid). ViewModel gained processing selections + live trim-hint validation; page gained a Processing section. §7.3/§8/§17 updated to match. |
 | 2026-07-05 | 0.5 | M3 queue: `IDownloadManager`/`DownloadJob` (module-owned, not Core) run a bounded-concurrency (`SemaphoreSlim` cap 3) download queue with auto-start on add, per-job + cancel-all cancellation, and clear-completed; `RetryPolicy` retries transient network failures with exponential backoff (3 attempts/1s base) while permanent errors fail fast; `IPlaylistProbe`/`PlaylistMapping` expand a playlist/channel URL into one job per entry at add-time. ViewModel restructured to add-to-queue with a bound `Jobs` list; page shows per-job progress/cancel + cancel-all/clear-completed. §6/§7.2/§12/§19 updated to match the realized design; §19 concurrency + pause/resume resolved. |
 | 2026-07-05 | 0.4 | M2 formats: full matrix via pure `OptionSetBuilder` — video (MP4/MKV/WebM) at a resolution cap + audio-only (MP3/WAV/M4A/Opus/FLAC) with bitrate; `DownloadConfig` model; ViewModel selections + page dropdowns; §7.3 flags finalized (mux over recode, `--audio-quality` via custom option). |

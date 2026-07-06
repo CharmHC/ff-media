@@ -33,6 +33,24 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-06 — M5 Experience (PR 1: foundation)
+
+- **Done:** Persistence foundation + settings + theming. `JsonStore<T>` (Core) does
+  atomic temp-file writes and quarantines a corrupt file to `.bak` before returning a
+  default. `AppSettings` (`Version`/`DefaultOutputFolder`/`MaxConcurrency`/`Theme`) +
+  `ISettingsService`/`SettingsService` persist to `%AppData%\FFMedia\settings.json`;
+  `AddFFMediaCore` gained a `dataDirectory` param and registers the service. App gained
+  `ThemeService` (light/dark/system via WPF-UI `ApplicationThemeManager`), a **Settings**
+  screen (footer nav) with folder/concurrency/theme, a title-bar theme toggle, and
+  startup theme application. Wired into behavior: downloader output folder seeded from
+  settings; `DownloadManager` concurrency cap read from settings at construction. SDD → v0.7.
+- **Decisions:** history stored as JSON (resolves §19); notifications in-app only
+  (Windows toast deferred to M6); concurrency applied at launch (live re-tuning deferred);
+  App-layer VMs verified by build + manual run (Tests doesn't reference the WinExe; UI is
+  thin per §14). Presets/history/notifications land in PR 2 (`feat/m5-presets-history`).
+- **Next:** M5 PR 2 — presets (inline), history + screen, in-app notifications, and the
+  `DownloadManager` completion hook.
+
 ### 2026-07-05 — M4 Processing
 
 - **Done:** `ProcessingOptions` (`TrimRange?` Trim, `PreciseCut`, `EmbedSubtitles`,

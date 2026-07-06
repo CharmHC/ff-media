@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using FFMedia.Core.Settings;
 using FFMedia.Tools.YouTubeDownloader.Models;
 using FFMedia.Tools.YouTubeDownloader.Services;
 
@@ -12,14 +12,14 @@ public partial class DownloaderViewModel : ObservableObject
     private readonly IPlaylistProbe _playlistProbe;
     private readonly IDownloadManager _manager;
 
-    public DownloaderViewModel(IPlaylistProbe playlistProbe, IDownloadManager manager)
+    public DownloaderViewModel(IPlaylistProbe playlistProbe, IDownloadManager manager, ISettingsService settings)
     {
         ArgumentNullException.ThrowIfNull(playlistProbe);
         ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(settings);
         _playlistProbe = playlistProbe;
         _manager = manager;
-        OutputFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "FFMedia");
+        OutputFolder = settings.Current.DefaultOutputFolder;
     }
 
     /// <summary>The live queue, bound directly to the page's job list.</summary>

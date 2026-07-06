@@ -1,3 +1,4 @@
+using FFMedia.Core.Settings;
 using FFMedia.Core.Tools;
 using FFMedia.Tools.YouTubeDownloader.Infrastructure;
 using FFMedia.Tools.YouTubeDownloader.Navigation;
@@ -18,7 +19,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMediaProbe, YtDlpMediaProbe>();
         services.AddSingleton<IDownloadService, YtDlpDownloadService>();
         services.AddSingleton<RetryPolicy>(RetryPolicy.Default);
-        services.AddSingleton<IDownloadManager, DownloadManager>();
+        services.AddSingleton<IDownloadManager>(sp => new DownloadManager(
+            sp.GetRequiredService<IDownloadService>(),
+            sp.GetRequiredService<RetryPolicy>(),
+            Math.Max(1, sp.GetRequiredService<ISettingsService>().Current.MaxConcurrency)));
         services.AddSingleton<IPlaylistProbe, YtDlpPlaylistProbe>();
         services.AddTransient<DownloaderViewModel>();
         services.AddTransient<DownloaderPage>();
