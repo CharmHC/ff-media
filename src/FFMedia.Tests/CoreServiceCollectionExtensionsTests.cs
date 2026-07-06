@@ -52,4 +52,16 @@ public class CoreServiceCollectionExtensionsTests
 
         Assert.Equal(3, settings.Current.MaxConcurrency); // default when no file exists
     }
+
+    [Fact]
+    public void AddFFMediaCore_ResolvesHistoryService()
+    {
+        var provider = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: Path.GetTempPath(), dataDirectory: Path.GetTempPath())
+            .BuildServiceProvider();
+
+        var history = provider.GetRequiredService<FFMedia.Core.History.IHistoryService>();
+
+        Assert.Empty(history.Query());
+    }
 }
