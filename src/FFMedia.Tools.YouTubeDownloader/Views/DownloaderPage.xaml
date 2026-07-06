@@ -62,6 +62,24 @@
                 </StackPanel>
             </StackPanel>
 
+            <StackPanel Margin="0,16,0,0">
+                <TextBlock Text="Presets" FontWeight="SemiBold" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <ComboBox Width="200" ItemsSource="{Binding Presets}"
+                              SelectedItem="{Binding SelectedPreset}"
+                              DisplayMemberPath="Name"
+                              ToolTip="Choose a saved preset, then Apply" />
+                    <ui:Button Content="Apply" Margin="8,0,0,0" Command="{Binding ApplyPresetCommand}" />
+                    <ui:Button Content="Delete" Margin="8,0,0,0" Command="{Binding DeletePresetCommand}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <ui:TextBox Width="200" PlaceholderText="New preset name"
+                                Text="{Binding NewPresetName, UpdateSourceTrigger=PropertyChanged}" />
+                    <ui:Button Content="Save current as preset" Margin="8,0,0,0"
+                               Command="{Binding SaveAsPresetCommand}" />
+                </StackPanel>
+            </StackPanel>
+
             <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                 <ui:Button Content="Add to queue" Appearance="Primary" Command="{Binding AddToQueueCommand}" />
                 <ui:Button Content="Cancel all" Command="{Binding CancelAllCommand}" Margin="8,0,0,0" />
