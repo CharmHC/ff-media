@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using FFMedia.Core.History;
+using FFMedia.Core.Notifications;
 using FFMedia.Tools.YouTubeDownloader.Models;
 
 namespace FFMedia.Tools.YouTubeDownloader.Services;
@@ -15,16 +17,25 @@ public sealed class DownloadManager : IDownloadManager, IDisposable
     private readonly SemaphoreSlim _slots;
     private readonly ObservableCollection<DownloadJob> _jobs = new();
     private readonly object _gate = new();
+    private readonly IHistoryService? _history;
+    private readonly INotificationService? _notifications;
     private int _activeCount;
     private TaskCompletionSource? _idleTcs;
 
-    public DownloadManager(IDownloadService download, RetryPolicy policy, int maxConcurrency = 3)
+    public DownloadManager(
+        IDownloadService download,
+        RetryPolicy policy,
+        int maxConcurrency = 3,
+        IHistoryService? history = null,
+        INotificationService? notifications = null)
     {
         ArgumentNullException.ThrowIfNull(download);
         ArgumentNullException.ThrowIfNull(policy);
         if (maxConcurrency < 1) throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
         _download = download;
         _policy = policy;
+        _history = history;
+        _notifications = notifications;
         _slots = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         Jobs = new ReadOnlyObservableCollection<DownloadJob>(_jobs);
     }
@@ -75,7 +86,11 @@ public sealed class DownloadManager : IDownloadManager, IDisposable
 
     private async Task RunAndTrackAsync(DownloadJob job)
     {
-        try { await RunAsync(job); }
+        try
+        {
+            await RunAsync(job);
+            RaiseTerminalSideEffects(job);
+        }
         finally
         {
             TaskCompletionSource? toComplete = null;
@@ -86,6 +101,38 @@ public sealed class DownloadManager : IDownloadManager, IDisposable
             toComplete?.TrySetResult();
         }
     }
+
+    /// <summary>Records history and raises a notification for a terminal job. Best-effort:
+    /// side effects must never break the queue, so failures here are swallowed.</summary>
+    private void RaiseTerminalSideEffects(DownloadJob job)
+    {
+        try
+        {
+            switch (job.Status)
+            {
+                case JobStatus.Completed:
+                    _history?.Append(new HistoryEntry(
+                        job.Title, job.Url, job.OutputPath, DescribeFormat(job.Config),
+                        DateTimeOffset.Now, job.Status.ToString()));
+                    _notifications?.Notify(new Notification(
+                        "Download complete", $"\"{job.Title}\" finished.", NotificationSeverity.Success));
+                    break;
+                case JobStatus.Failed:
+                    _notifications?.Notify(new Notification(
+                        "Download failed", $"\"{job.Title}\": {job.ErrorMessage}", NotificationSeverity.Error));
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Terminal side-effect failed for {job.Title}: {ex}");
+        }
+    }
+
+    private static string DescribeFormat(DownloadConfig config) =>
+        config.Kind == OutputKind.Video
+            ? $"{config.Container} {config.Resolution}"
+            : $"{config.AudioFormat} {config.Bitrate}";
 
     private async Task RunAsync(DownloadJob job)
     {
