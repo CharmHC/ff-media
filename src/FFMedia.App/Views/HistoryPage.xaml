@@ -1,0 +1,54 @@
+<Page x:Class="FFMedia.App.Views.HistoryPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="History" FontSize="24" FontWeight="SemiBold" />
+            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <ui:TextBox Width="280" PlaceholderText="Filter by title, URL, or format…"
+                            Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}" />
+                <ui:Button Content="Clear history" Margin="12,0,0,0" Command="{Binding ClearCommand}" />
+            </StackPanel>
+        </StackPanel>
+
+        <ItemsControl Grid.Row="1" Margin="0,16,0,0" ItemsSource="{Binding Entries}"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Padding="12" Margin="0,0,0,8" CornerRadius="6"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Url}" Opacity="0.7" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                    <TextBlock Text="{Binding Format}" Opacity="0.6" />
+                                    <TextBlock Text="{Binding Timestamp, StringFormat='  ·  {0:g}'}" Opacity="0.6" />
+                                    <TextBlock Text="{Binding Status, StringFormat='  ·  {0}'}" Opacity="0.6" />
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="12,0,0,0">
+                                <ui:Button Content="Open file"
+                                           Command="{Binding DataContext.OpenFileCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                                <ui:Button Content="Open folder" Margin="8,0,0,0"
+                                           Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </Grid>
+</Page>

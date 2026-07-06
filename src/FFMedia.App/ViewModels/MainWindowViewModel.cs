@@ -52,6 +52,12 @@ public partial class MainWindowViewModel : ObservableObject
         {
             new NavigationViewItem
             {
+                Content = "History",
+                Icon = new FontIcon { Glyph = "" }, // Segoe Fluent "History"
+                TargetPageType = typeof(HistoryPage),
+            },
+            new NavigationViewItem
+            {
                 Content = "Settings",
                 Icon = new FontIcon { Glyph = "" }, // Segoe Fluent settings gear
                 TargetPageType = typeof(SettingsPage),
