@@ -32,5 +32,8 @@
                            FooterMenuItemsSource="{Binding FooterMenuItems}"
                            IsBackButtonVisible="Collapsed"
                            PaneDisplayMode="Left" />
+
+        <ui:SnackbarPresenter Grid.Row="1" x:Name="RootSnackbar"
+                              VerticalAlignment="Bottom" Margin="0,0,0,16" />
     </Grid>
 </ui:FluentWindow>

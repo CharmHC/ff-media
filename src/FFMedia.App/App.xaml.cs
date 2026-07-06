@@ -36,6 +36,9 @@ public partial class App : Application
                 services.AddSingleton<INavigationService, NavigationService>();
                 services.AddYouTubeDownloader();
                 services.AddSingleton<FFMedia.App.Services.ThemeService>();
+                services.AddSingleton<Wpf.Ui.ISnackbarService, Wpf.Ui.SnackbarService>();
+                services.AddSingleton<FFMedia.Core.Notifications.INotificationService,
+                    FFMedia.App.Services.SnackbarNotificationService>();
                 services.AddTransient<FFMedia.App.ViewModels.SettingsViewModel>();
                 services.AddTransient<FFMedia.App.Views.SettingsPage>();
                 services.AddSingleton<MainWindowViewModel>();
