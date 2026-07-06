@@ -45,8 +45,21 @@ public class DownloaderViewModelTests
         public event EventHandler<FFMedia.Core.Settings.AppSettings>? Changed { add { } remove { } }
     }
 
-    private static DownloaderViewModel Vm(FakePlaylistProbe probe, FakeManager mgr) =>
-        new(probe, mgr, new FakeSettings());
+    private sealed class FakePresets : FFMedia.Core.Presets.IPresetService
+    {
+        public List<FFMedia.Core.Presets.Preset> Items { get; } = new();
+        public IReadOnlyList<FFMedia.Core.Presets.Preset> List() => Items;
+        public void Save(FFMedia.Core.Presets.Preset preset)
+        {
+            Items.RemoveAll(p => p.Name == preset.Name);
+            Items.Add(preset);
+        }
+        public void Delete(string name) => Items.RemoveAll(p => p.Name == name);
+        public event EventHandler? Changed { add { } remove { } }
+    }
+
+    private static DownloaderViewModel Vm(FakePlaylistProbe probe, FakeManager mgr, FakePresets? presets = null) =>
+        new(probe, mgr, new FakeSettings(), presets ?? new FakePresets());
 
     [Fact]
     public async Task AddToQueue_SingleEntry_EnqueuesOneJobWithSelectedConfig()
@@ -213,5 +226,76 @@ public class DownloaderViewModelTests
     {
         var vm = Vm(new FakePlaylistProbe(), new FakeManager());
         Assert.Equal(@"C:\seeded", vm.OutputFolder);
+    }
+
+    [Fact]
+    public void SaveAsPreset_SerializesCurrentConfig_UnderGivenName()
+    {
+        var presets = new FakePresets();
+        var vm = Vm(new FakePlaylistProbe(), new FakeManager(), presets);
+        vm.SelectedKind = OutputKind.Audio;
+        vm.SelectedAudioFormat = AudioFormat.Mp3;
+        vm.SelectedBitrate = AudioBitrate.K192;
+        vm.NewPresetName = "Podcast";
+
+        vm.SaveAsPresetCommand.Execute(null);
+
+        var saved = Assert.Single(presets.Items);
+        Assert.Equal("Podcast", saved.Name);
+        var config = FFMedia.Tools.YouTubeDownloader.Services.PresetMapping.Deserialize(saved.Payload);
+        Assert.Equal(OutputKind.Audio, config.Kind);
+        Assert.Equal(AudioFormat.Mp3, config.AudioFormat);
+        Assert.Equal(AudioBitrate.K192, config.Bitrate);
+        Assert.Contains(vm.Presets, p => p.Name == "Podcast");
+    }
+
+    [Fact]
+    public void ApplyPreset_SeedsSelectionsFromPayload()
+    {
+        var presets = new FakePresets();
+        var config = new DownloadConfig(
+            OutputKind.Video, VideoContainer.Mkv, VideoResolution.P720,
+            AudioFormat.Mp3, AudioBitrate.Best,
+            new ProcessingOptions(null, PreciseCut: true, EmbedSubtitles: true, SubtitleLanguage: "fr",
+                EmbedMetadata: false, EmbedThumbnail: false));
+        presets.Items.Add(new FFMedia.Core.Presets.Preset(
+            "HD", FFMedia.Tools.YouTubeDownloader.Services.PresetMapping.Serialize(config)));
+        var vm = Vm(new FakePlaylistProbe(), new FakeManager(), presets);
+        vm.SelectedPreset = vm.Presets[0];
+
+        vm.ApplyPresetCommand.Execute(null);
+
+        Assert.Equal(VideoContainer.Mkv, vm.SelectedContainer);
+        Assert.Equal(VideoResolution.P720, vm.SelectedResolution);
+        Assert.True(vm.PreciseCut);
+        Assert.True(vm.EmbedSubtitles);
+        Assert.Equal("fr", vm.SubtitleLanguage);
+        Assert.False(vm.EmbedMetadata);
+        Assert.False(vm.EmbedThumbnail);
+    }
+
+    [Fact]
+    public void DeletePreset_RemovesSelected()
+    {
+        var presets = new FakePresets();
+        presets.Items.Add(new FFMedia.Core.Presets.Preset("Gone", "{}"));
+        var vm = Vm(new FakePlaylistProbe(), new FakeManager(), presets);
+        vm.SelectedPreset = vm.Presets[0];
+
+        vm.DeletePresetCommand.Execute(null);
+
+        Assert.Empty(presets.Items);
+        Assert.Empty(vm.Presets);
+    }
+
+    [Fact]
+    public void Presets_PopulatedFromServiceAtConstruction()
+    {
+        var presets = new FakePresets();
+        presets.Items.Add(new FFMedia.Core.Presets.Preset("Seed", "{}"));
+
+        var vm = Vm(new FakePlaylistProbe(), new FakeManager(), presets);
+
+        Assert.Contains(vm.Presets, p => p.Name == "Seed");
     }
 }
