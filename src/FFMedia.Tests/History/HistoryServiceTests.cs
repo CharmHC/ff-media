@@ -73,4 +73,14 @@ public class HistoryServiceTests
 
         Assert.Empty(svc.Query());
     }
+
+    [Fact]
+    public void Append_IsThreadSafe_UnderConcurrency()
+    {
+        var svc = new HistoryService(TempDir(), NullLogger<HistoryService>.Instance);
+
+        System.Threading.Tasks.Parallel.For(0, 100, i => svc.Append(Entry("E" + i)));
+
+        Assert.Equal(100, svc.Query().Count);
+    }
 }

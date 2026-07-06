@@ -43,4 +43,13 @@ public class PresetMappingTests
 
         Assert.Equal(OutputKind.Audio, result.Kind);
     }
+
+    [Fact]
+    public void Deserialize_PartialPayload_FillsProcessingDefault()
+    {
+        var result = PresetMapping.Deserialize("{\"Kind\":\"Audio\"}");
+
+        Assert.Equal(OutputKind.Audio, result.Kind);
+        Assert.Equal(ProcessingOptions.Default, result.Processing);
+    }
 }

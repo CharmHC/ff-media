@@ -102,30 +102,35 @@ public sealed class DownloadManager : IDownloadManager, IDisposable
         }
     }
 
-    /// <summary>Records history and raises a notification for a terminal job. Best-effort:
-    /// side effects must never break the queue, so failures here are swallowed.</summary>
+    /// <summary>Records history and raises a notification for a terminal job. Each side effect is
+    /// isolated: side effects must never break the queue, and one failing must not skip the other.</summary>
     private void RaiseTerminalSideEffects(DownloadJob job)
+    {
+        switch (job.Status)
+        {
+            case JobStatus.Completed:
+                Safe(() => _history?.Append(new HistoryEntry(
+                    job.Title, job.Url, job.OutputPath, DescribeFormat(job.Config),
+                    DateTimeOffset.Now, job.Status.ToString())));
+                Safe(() => _notifications?.Notify(new Notification(
+                    "Download complete", $"\"{job.Title}\" finished.", NotificationSeverity.Success)));
+                break;
+            case JobStatus.Failed:
+                Safe(() => _notifications?.Notify(new Notification(
+                    "Download failed", $"\"{job.Title}\": {job.ErrorMessage}", NotificationSeverity.Error)));
+                break;
+        }
+    }
+
+    private static void Safe(Action action)
     {
         try
         {
-            switch (job.Status)
-            {
-                case JobStatus.Completed:
-                    _history?.Append(new HistoryEntry(
-                        job.Title, job.Url, job.OutputPath, DescribeFormat(job.Config),
-                        DateTimeOffset.Now, job.Status.ToString()));
-                    _notifications?.Notify(new Notification(
-                        "Download complete", $"\"{job.Title}\" finished.", NotificationSeverity.Success));
-                    break;
-                case JobStatus.Failed:
-                    _notifications?.Notify(new Notification(
-                        "Download failed", $"\"{job.Title}\": {job.ErrorMessage}", NotificationSeverity.Error));
-                    break;
-            }
+            action();
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Terminal side-effect failed for {job.Title}: {ex}");
+            System.Diagnostics.Debug.WriteLine($"Terminal side-effect failed: {ex}");
         }
     }
 

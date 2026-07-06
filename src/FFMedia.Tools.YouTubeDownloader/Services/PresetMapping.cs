@@ -28,7 +28,14 @@ public static class PresetMapping
 
         try
         {
-            return JsonSerializer.Deserialize<DownloadConfig>(payload, Options) ?? DownloadConfig.Default;
+            var config = JsonSerializer.Deserialize<DownloadConfig>(payload, Options);
+            if (config is null)
+            {
+                return DownloadConfig.Default;
+            }
+            return config.Processing is null
+                ? config with { Processing = ProcessingOptions.Default }
+                : config;
         }
         catch (JsonException)
         {

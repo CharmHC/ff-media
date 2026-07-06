@@ -8,6 +8,7 @@ namespace FFMedia.Core.History;
 public sealed class HistoryService : IHistoryService
 {
     private readonly JsonStore<HistoryDocument> _store;
+    private readonly object _gate = new();
     private HistoryDocument _document;
 
     public HistoryService(string dataDirectory, ILogger<HistoryService> logger)
@@ -23,17 +24,23 @@ public sealed class HistoryService : IHistoryService
     public void Append(HistoryEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        var entries = new List<HistoryEntry>(_document.Entries.Count + 1) { entry };
-        entries.AddRange(_document.Entries); // newest first
-        _document = _document with { Entries = entries };
-        _store.Save(_document);
+        lock (_gate)
+        {
+            var entries = new List<HistoryEntry>(_document.Entries.Count + 1) { entry };
+            entries.AddRange(_document.Entries); // newest first
+            _document = _document with { Entries = entries };
+            _store.Save(_document);
+        }
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public void Clear()
     {
-        _document = _document with { Entries = Array.Empty<HistoryEntry>() };
-        _store.Save(_document);
+        lock (_gate)
+        {
+            _document = _document with { Entries = Array.Empty<HistoryEntry>() };
+            _store.Save(_document);
+        }
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
