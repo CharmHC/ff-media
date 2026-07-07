@@ -42,6 +42,7 @@ public partial class App : Application
                 services.AddSingleton<FFMedia.Core.Updates.IUpdateService,
                     FFMedia.App.Services.VelopackUpdateService>();
                 services.AddSingleton<FFMedia.App.ViewModels.UpdateViewModel>();
+                services.AddSingleton<FFMedia.App.ViewModels.BinaryUpdateViewModel>();
                 services.AddTransient<FFMedia.App.ViewModels.SettingsViewModel>();
                 services.AddTransient<FFMedia.App.Views.SettingsPage>();
                 services.AddTransient<FFMedia.App.ViewModels.HistoryViewModel>();
