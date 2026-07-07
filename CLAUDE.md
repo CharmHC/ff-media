@@ -33,6 +33,38 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-07 — M6 Ship v1 (PR 1: packaging + app auto-update)
+
+- **Done:** Velopack packaging + delta auto-update. Explicit `Program.Main` runs
+  `VelopackApp.Build().Run()` before WPF (App.xaml switched to a `Page`, `<StartupObject>`
+  set). Core `IUpdateService`/`AppUpdateInfo` realized in App by `VelopackUpdateService`
+  (Velopack `UpdateManager` + GitHub `GithubSource`, stable channel; safe no-op when
+  uninstalled/dev). Singleton `UpdateViewModel` drives a dismissible shell **update banner**
+  (Update & restart / Later) and a Settings **"Check for updates now"** action + current-version
+  display; a new `AppSettings.CheckForUpdatesOnStartup` (schema **v2**) gates a fire-and-forget
+  startup check that never blocks/crashes launch. `build/pack.ps1` (publish self-contained +
+  `vpk pack`, unsigned) + tag-gated `.github/workflows/release.yml` (`vpk upload github`).
+  Velopack pinned at **1.2.0** (NuGet package + `vpk` CLI, matched versions).
+  **Verified:** solution builds Release **0 warnings / 0 errors**, all **152/152** unit tests
+  pass (`Category!=Integration`), and `build/pack.ps1` was run for real and produced an actual
+  `FFMedia-win-Setup.exe` (~147 MB) + delta nupkg + `RELEASES` metadata locally — the pack
+  machinery is proven end-to-end. `vpk`/`vpk upload github` flags were confirmed against the
+  installed CLI's `--help` output. **Not verified (pending user dry-run):** the interactive
+  install → pack 0.9.1 → banner appears → "Update & restart" → relaunch onto 0.9.1 loop, and a
+  GUI smoke of the shell update banner and the Settings update section — this build environment
+  is headless and can't drive a GUI, so these were reviewed by code/build inspection only, not
+  exercised. SDD → v0.9.
+- **Decisions:** update feed = GitHub Releases; UX = check-on-startup + manual (no silent
+  installs); unsigned for v1 (SmartScreen accepted; `--signParams` seam left in `pack.ps1`);
+  the real public **v1.0.0** tag is left to the user (machinery + local pack dry-run only, no
+  tag pushed, no GitHub Actions release run performed). App-layer VMs
+  (`UpdateViewModel`/`SettingsViewModel`) verified by build + manual per the M5 precedent
+  (Tests doesn't reference the WinExe); only `AppSettings` migration is unit-tested.
+- **Next:** M6 PR 2 — yt-dlp self-update (`IProcessRunner` + `IBinaryUpdateService`), binary
+  version display in Settings, pinned `fetch-binaries.ps1` with hash checks. Before that: user
+  performs the pending interactive dry-run (install → banner → update → relaunch) and GUI smoke
+  of the banner/Settings controls; a whole-branch review runs before this PR is opened.
+
 ### 2026-07-06 — M5 Experience (PR 2: presets, history, notifications)
 
 - **Done:** Presets — `IPresetService`/`PresetService` (Core, JSON-backed via

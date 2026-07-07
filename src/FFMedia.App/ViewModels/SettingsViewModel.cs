@@ -11,23 +11,30 @@ public partial class SettingsViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly ThemeService _theme;
 
-    public SettingsViewModel(ISettingsService settings, ThemeService theme)
+    public SettingsViewModel(ISettingsService settings, ThemeService theme, UpdateViewModel updates)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(theme);
+        ArgumentNullException.ThrowIfNull(updates);
         _settings = settings;
         _theme = theme;
+        Updates = updates;
 
         var current = settings.Current;
         _defaultOutputFolder = current.DefaultOutputFolder;
         _maxConcurrency = current.MaxConcurrency;
         _selectedTheme = current.Theme;
+        _checkForUpdatesOnStartup = current.CheckForUpdatesOnStartup;
     }
 
     [ObservableProperty] private string _defaultOutputFolder;
     [ObservableProperty] private int _maxConcurrency;
     [ObservableProperty] private AppTheme _selectedTheme;
+    [ObservableProperty] private bool _checkForUpdatesOnStartup;
     [ObservableProperty] private string _statusMessage = string.Empty;
+
+    /// <summary>Shared update state (also drives the shell banner). Bound by the Settings "check now" UI.</summary>
+    public UpdateViewModel Updates { get; }
 
     public IReadOnlyList<AppTheme> Themes { get; } = Enum.GetValues<AppTheme>();
 
@@ -49,6 +56,7 @@ public partial class SettingsViewModel : ObservableObject
             DefaultOutputFolder = DefaultOutputFolder,
             MaxConcurrency = Math.Max(1, MaxConcurrency),
             Theme = SelectedTheme,
+            CheckForUpdatesOnStartup = CheckForUpdatesOnStartup,
         };
         _settings.Save(updated);
         _theme.Apply(SelectedTheme);

@@ -6,10 +6,11 @@ namespace FFMedia.Core.Settings;
 /// <see cref="Version"/> field supports forward migration.</summary>
 public sealed record AppSettings
 {
-    public int Version { get; init; } = 1;
+    public int Version { get; init; } = 2;
     public string DefaultOutputFolder { get; init; } = DefaultFolder();
     public int MaxConcurrency { get; init; } = 3;
     public AppTheme Theme { get; init; } = AppTheme.System;
+    public bool CheckForUpdatesOnStartup { get; init; } = true;
 
     public static AppSettings Default => new();
 

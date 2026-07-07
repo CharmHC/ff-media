@@ -1,0 +1,45 @@
+name: release
+
+# Fires only when the maintainer pushes a version tag (e.g. v1.0.0). Until then this is
+# dormant — the real public v1.0.0 release stays a deliberate, user-initiated action.
+on:
+  push:
+    tags: [ 'v*' ]
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpk
+
+      - name: Derive version from tag
+        shell: pwsh
+        run: |
+          $v = $env:GITHUB_REF_NAME.TrimStart('v')
+          echo "PACK_VERSION=$v" >> $env:GITHUB_ENV
+
+      - name: Pack (publish + vpk pack)
+        shell: pwsh
+        run: ./build/pack.ps1 -Version $env:PACK_VERSION
+
+      - name: Publish to GitHub Release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          vpk upload github `
+            --repoUrl https://github.com/ChamHC-dev/ff-media `
+            --publish `
+            --releaseName "FFMedia $env:PACK_VERSION" `
+            --tag $env:GITHUB_REF_NAME `
+            --token $env:GITHUB_TOKEN `
+            --outputDir artifacts/releases

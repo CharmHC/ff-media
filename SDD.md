@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.8 · **Last updated:** 2026-07-06
+> **Status:** Living document · **Version:** 0.9 · **Last updated:** 2026-07-07
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -76,7 +76,7 @@ FFMedia is, at its heart, a **polished orchestrator** over `yt-dlp` + `ffmpeg`.
 | Media processing | **[FFMpegCore](https://github.com/rosenbjerg/FFMpegCore)** (MIT) | Fluent ffmpeg wrapper for trim + future tools. MIT license (commercial-safe). |
 | Logging | **Serilog** (file + in-app sink) | Diagnose yt-dlp/ffmpeg failures from user logs. |
 | Persistence | **System.Text.Json** (settings/presets/history) | Simple; migrate history to SQLite only if it grows. |
-| Packaging / update | **[Velopack](https://velopack.io/)** | Installer + delta auto-update, no UAC prompt; can update bundled yt-dlp. |
+| Packaging / update | **[Velopack](https://velopack.io/)** (pinned **1.2.0** — NuGet package + `vpk` CLI tool, matched versions) | Installer + delta auto-update, no UAC prompt; can update bundled yt-dlp. |
 | Testing | **xUnit** | Tests use xUnit. Assertion library deferred — FluentAssertions v8+ is a paid commercial license; evaluate **Shouldly** / **AwesomeAssertions** (both free) when richer assertions are needed. M0 uses plain `Assert`. |
 
 > **Rejected alternatives:** WinUI 3 (rougher windowing/packaging for a solo dev),
@@ -217,6 +217,14 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
 > `SnackbarNotificationService`, wrapping WPF-UI's `ISnackbarService` (in-app snackbar
 > only; native Windows toast remains deferred to M6, per §13).
 
+> **M6 PR 1 note:** a new Core abstraction `IUpdateService` (with `AppUpdateInfo`) is
+> **realized** in the App layer as `VelopackUpdateService`, wrapping Velopack's
+> `UpdateManager` + a GitHub `GithubSource` (stable channel). `FFMedia.Core` stays
+> packaging-free — it only defines the interface/DTO; `VelopackUpdateService` is a
+> safe no-op (`CheckForUpdatesAsync` returns "no update") when the app is not an
+> installed Velopack app (e.g. running via `dotnet run`/dev), so nothing crashes
+> outside an installed context.
+
 ---
 
 ## 7. YouTube Downloader Module (detailed)
@@ -342,10 +350,21 @@ directly (as opposed to delegating to yt-dlp):
   into their output** so `dotnet run` and the integration tests find the binaries
   (no-op when the folder is empty — run `build/fetch-binaries.ps1` first).
 - **Updating:**
-  - **App + ffmpeg** update via **Velopack** releases.
+  - **App + ffmpeg** update via **Velopack** releases. ffmpeg has no independent
+    update path — it rides the app's own release cadence (rebundled whenever the
+    app is repackaged), same as before.
   - **yt-dlp** additionally supports in-app self-update (`yt-dlp -U`) because it
     breaks frequently against YouTube changes and must update independently of app
     releases. Update checks are user-initiated or on a configurable schedule.
+
+> **M6 PR 1 note:** the **app** update path is now **realized**. `VelopackUpdateService`
+> performs a Velopack check-on-startup (gated by `AppSettings.CheckForUpdatesOnStartup`,
+> fire-and-forget, never blocks/crashes launch) and a manual "Check for updates now"
+> from Settings, both against a GitHub Releases feed (`GithubSource`, stable channel).
+> When an update is found, the shell shows a dismissible banner ("Update & restart" /
+> "Later") that downloads and applies the update via Velopack, then restarts the app.
+> **yt-dlp self-update** (`IProcessRunner` + a dedicated `IBinaryUpdateService`) is
+> **not** part of this PR — it's scoped to **M6 PR 2**, unchanged from the plan above.
 
 ---
 
@@ -366,6 +385,10 @@ Schema changes carry a `version` field for forward migration.
 > (atomic temp-file write + corrupt-file quarantine to `.bak`, defaulting on read
 > failure). `AppSettings` carries a `Version` field for forward migration, per the
 > convention above.
+
+> **M6 PR 1 note:** `AppSettings.Version` moves to **2** with the addition of
+> `CheckForUpdatesOnStartup` (`bool`, default `true`), covered by unit tests
+> (`AppSettingsUpdateFlagTests`).
 
 ---
 
@@ -448,6 +471,15 @@ Schema changes carry a `version` field for forward migration.
 > (severity → `ControlAppearance`: Success/Caution/Danger/Info); **native Windows toast
 > notifications remain deferred to M6**, unchanged from the plan.
 
+> **M6 PR 1 note:** the shell gains a dismissible **update banner** (driven by a
+> singleton `UpdateViewModel`) offering "Update & restart" / "Later" when a newer
+> version is available. The **Settings screen** gains a "check for updates on
+> startup" toggle (bound to `AppSettings.CheckForUpdatesOnStartup`), a "Check for
+> updates now" action, and a current-version display. Both the banner and the
+> Settings update section were verified by build + manual code review only — the
+> interactive install → update → relaunch loop and a GUI smoke of these controls are
+> **pending a user dry-run** in the headless dev/CI environment (see Changelog 0.9).
+
 ---
 
 ## 14. Testing Strategy
@@ -471,6 +503,21 @@ Schema changes carry a `version` field for forward migration.
 - Release channel + update feed configured in `build/`.
 - Self-contained .NET publish (no framework prerequisite for end users).
 - CI builds on every push; release workflow tags → Velopack pack + publish.
+
+> **M6 PR 1 note (realized):** `build/pack.ps1` does a self-contained
+> `dotnet publish` of `FFMedia.App`, then `vpk pack` (Velopack 1.2.0 CLI) into an
+> unsigned `FFMedia-win-Setup.exe` + delta nupkg + `RELEASES` metadata (no
+> `--signParams` supplied for v1; the seam is left in the script for later signing).
+> `.github/workflows/release.yml` is **tag-gated** (`v*`), needs
+> `permissions: contents: write`, and runs the same publish + `vpk pack` before
+> `vpk upload github` to attach the release assets to the GitHub Release matching the
+> tag. The real, public **v1.0.0** tag is **user-initiated** — not pushed by this PR.
+> Locally, `build/pack.ps1` was run end-to-end and produced a real
+> `FFMedia-win-Setup.exe` (~147 MB) + nupkg + `RELEASES` file, proving the pack
+> machinery; the full tag → GitHub Actions → `vpk upload github` → install →
+> in-app update path has **not** been run for real (pending the user's first
+> release) and the interactive install/update/relaunch loop is a pending
+> user dry-run (see Changelog 0.9).
 
 ---
 
@@ -497,7 +544,7 @@ Each milestone is a **vertical, shippable increment**.
 | **M3** | Queue | ✅ delivered (branch `feat/m3-queue`) — Download **queue** (`IDownloadManager`/`DownloadJob`, module-owned) with bounded **concurrency** (`SemaphoreSlim` cap 3), transient-only retry with exponential backoff, and **playlist/channel** expansion at add-time (one job per entry). |
 | **M4** | Processing | ✅ delivered (branch `feat/m4-processing`) — **Trim/clip** (fast keyframe cut or precise re-encode), **subtitles** (video-only, manual + auto), **metadata + thumbnail** embedding. |
 | **M5** | Experience | ✅ delivered (branches `feat/m5-foundation`, `feat/m5-presets-history`) — **PR 1:** settings persistence + theming foundation (`JsonStore<T>`, `ISettingsService`, Settings screen, dark/light/system theming). **PR 2:** presets (`IPresetService`, inline Downloader UI), history (`IHistoryService`, `DownloadManager` completion hook, History screen), and in-app snackbar notifications (`INotificationService`/`SnackbarNotificationService`). Re-download from history deferred (§19). |
-| **M6** | Ship v1 | **Velopack** installer + delta auto-update, yt-dlp/ffmpeg update flow, **v1 release**. |
+| **M6** | Ship v1 | 🚧 **in progress** (branch `feat/m6-packaging-autoupdate`) — **PR 1 delivered:** Velopack packaging (`build/pack.ps1`, tag-gated `release.yml`) + app delta auto-update (`IUpdateService`/`VelopackUpdateService`, shell update banner, Settings toggle + check-now). **PR 2 pending:** yt-dlp/ffmpeg binary update flow, then the public **v1 release**. |
 | **M7** | *(future)* | Second tool module (video **standardize/merge**) — validates the modular seam. |
 
 ---
@@ -557,6 +604,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-07 | 0.9 | M6 ship v1 (PR 1): Velopack packaging + app delta auto-update. Explicit `Program.Main` runs `VelopackApp.Build().Run()` before WPF startup. Core `IUpdateService`/`AppUpdateInfo` realized in App by `VelopackUpdateService` (Velopack `UpdateManager` + GitHub `GithubSource`, stable channel, pinned Velopack **1.2.0**; safe no-op when uninstalled/dev). Singleton `UpdateViewModel` drives a dismissible shell update banner (Update & restart / Later) and a Settings "Check for updates now" action + current-version display; `AppSettings.CheckForUpdatesOnStartup` (schema **v2**) gates a fire-and-forget startup check. `build/pack.ps1` (publish self-contained + `vpk pack`, unsigned) + tag-gated `.github/workflows/release.yml` (`vpk upload github`). Verified: solution builds Release 0/0, all 152 unit tests pass, `pack.ps1` produced a real installer + nupkg + `RELEASES` locally (pack machinery proven). **Not yet verified:** the interactive install → update → relaunch loop and a GUI smoke of the banner/Settings controls — pending a user dry-run (headless dev environment). §3/§6/§9/§10/§13/§15/§17 updated; M6 marked in progress (PR 2 — binary updates — pending). |
 | 2026-07-06 | 0.8 | M5 experience (PR 2): `IPresetService`/`IHistoryService`/`INotificationService` realized. JSON-backed `PresetService`/`HistoryService` (`presets.json`/`history.json`, `Changed` events); module `PresetMapping` (de)serializes `DownloadConfig` to an opaque payload string (tolerant on malformed/blank input); `DownloaderViewModel` gains save/apply/delete preset commands + an inline Presets section on the Downloader page. `DownloadManager` gains optional `IHistoryService?`/`INotificationService?` ctor params and appends history + notifies on `Completed`, notifies only on `Failed`, does neither on `Canceled` — dispatched inside `RunAndTrackAsync` before the idle signal, swallowed on failure so a broken sink can't break the queue. App gains `SnackbarNotificationService` (WPF-UI `SnackbarPresenter`) and a **History** screen (footer nav item: filter, open file/folder, clear). Re-download from history explicitly deferred (needs cross-page seeding seam + a config-carrying `HistoryEntry`). §6/§7.2/§13/§17/§19 updated; M5 marked complete. |
 | 2026-07-06 | 0.7 | M5 foundation (PR 1): generic `JsonStore<T>` (atomic write, corrupt-file quarantine) + `AppSettings`/`ISettingsService` (JSON at %AppData%\FFMedia\settings.json). `AddFFMediaCore` gains a `dataDirectory` param and registers `ISettingsService`. App gains a `ThemeService` (dark/light/system via WPF-UI), a Settings screen (default folder, max concurrency, theme) as a footer nav item, a title-bar theme toggle, and applies the persisted theme at startup. Settings wired into behavior: downloader output folder seeded from settings; `DownloadManager` concurrency cap read from settings. §6/§10/§12/§13/§17/§19 updated. |
 | 2026-07-05 | 0.6 | M4 processing: `ProcessingOptions` (`TrimRange?`/`PreciseCut`/`EmbedSubtitles`/`SubtitleLanguage`/`EmbedMetadata`/`EmbedThumbnail`, default metadata+thumbnail on) added to `DownloadConfig.Processing`; pure `OptionSetBuilder.ApplyProcessing` emits `--download-sections` (+ `--force-keyframes-at-cuts` when precise), video-only `--write-subs --write-auto-subs --embed-subs --sub-langs`, and `--embed-metadata`/`--embed-thumbnail`; pure `TrimParsing` (HH:MM:SS/MM:SS/seconds → `TimeSpan`, range only when valid). ViewModel gained processing selections + live trim-hint validation; page gained a Processing section. §7.3/§8/§17 updated to match. |
