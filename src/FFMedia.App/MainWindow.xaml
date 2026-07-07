@@ -3,6 +3,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="FFMedia" Width="1000" Height="640"
+                 Icon="pack://application:,,,/Assets/logo.png"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica">
@@ -57,7 +58,12 @@
                            MenuItemsSource="{Binding MenuItems}"
                            FooterMenuItemsSource="{Binding FooterMenuItems}"
                            IsBackButtonVisible="Collapsed"
-                           PaneDisplayMode="Left" />
+                           PaneDisplayMode="Left">
+            <ui:NavigationView.Header>
+                <Image Source="pack://application:,,,/Assets/logo.png"
+                       Height="28" HorizontalAlignment="Left" Margin="16,8" />
+            </ui:NavigationView.Header>
+        </ui:NavigationView>
 
         <ui:SnackbarPresenter Grid.Row="2" x:Name="RootSnackbar"
                               VerticalAlignment="Bottom" Margin="0,0,0,16" />

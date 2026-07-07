@@ -3,7 +3,7 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480">
-        <ui:SymbolIcon Symbol="Play24" FontSize="48" HorizontalAlignment="Center" />
+        <Image Source="pack://application:,,,/Assets/logo.png" Width="96" Height="96" HorizontalAlignment="Center" />
         <TextBlock Text="FFMedia" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,0" />
         <TextBlock TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0"
                    Text="Your all-in-one media toolbox. Tools will appear in the navigation pane." />
