@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -24,6 +25,21 @@ public class BinaryUpdateServiceTests
         {
             FirstArgs.Add(arguments.Count > 0 ? arguments[0] : "");
             return Task.FromResult(_results.Dequeue());
+        }
+    }
+
+    // Fake runner: returns a version for --version calls but throws for -U (simulates a
+    // missing/quarantined yt-dlp.exe surfacing as a Win32Exception from Process.Start).
+    private sealed class UpdateThrowingRunner : IProcessRunner
+    {
+        public Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments,
+            IProgress<string>? onOutputLine = null, CancellationToken ct = default)
+        {
+            if (arguments.Count > 0 && arguments[0] == "-U")
+            {
+                throw new System.ComponentModel.Win32Exception("The system cannot find the file specified.");
+            }
+            return Task.FromResult(new ProcessResult(0, "2026.07.01", ""));
         }
     }
 
@@ -119,5 +135,17 @@ public class BinaryUpdateServiceTests
 
         Assert.False(result.Updated);
         Assert.Equal("2026.07.04", result.ToVersion);
+    }
+
+    [Fact]
+    public async Task UpdateYtDlp_ReportsFailure_WhenRunnerThrows()
+    {
+        var svc = Make(new UpdateThrowingRunner(), new HttpClient(new StubHandler("{}")));
+
+        var result = await svc.UpdateYtDlpAsync();
+
+        Assert.False(result.Updated);
+        Assert.Equal("2026.07.01", result.FromVersion);
+        Assert.Contains("failed", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

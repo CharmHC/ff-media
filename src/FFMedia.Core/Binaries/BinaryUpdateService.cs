@@ -91,9 +91,23 @@ public sealed class BinaryUpdateService : IBinaryUpdateService
     {
         var from = await GetInstalledVersionAsync(ExternalBinary.YtDlp, ct).ConfigureAwait(false);
         var path = _binaries.GetPath(ExternalBinary.YtDlp);
-        var result = await _runner.RunAsync(path, new[] { "-U" }, null, ct).ConfigureAwait(false);
-        var to = await GetInstalledVersionAsync(ExternalBinary.YtDlp, ct).ConfigureAwait(false);
 
+        ProcessResult result;
+        try
+        {
+            result = await _runner.RunAsync(path, new[] { "-U" }, null, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "yt-dlp self-update failed to launch");
+            return new BinaryUpdateResult(false, from, from, "yt-dlp update failed. See logs.");
+        }
+
+        var to = await GetInstalledVersionAsync(ExternalBinary.YtDlp, ct).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             return new BinaryUpdateResult(false, from, to, "yt-dlp update failed. See logs.");
