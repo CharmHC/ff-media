@@ -20,14 +20,17 @@ public partial class MainWindowViewModel : ObservableObject
         IToolRegistry registry,
         IEnumerable<IToolPage> pages,
         ISettingsService settings,
-        ThemeService theme)
+        ThemeService theme,
+        UpdateViewModel updates)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(pages);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(theme);
+        ArgumentNullException.ThrowIfNull(updates);
         _settings = settings;
         _theme = theme;
+        Updates = updates;
 
         var pageById = pages.ToDictionary(p => p.ToolId, p => p.PageType);
         var items = new ObservableCollection<object>();
@@ -72,6 +75,9 @@ public partial class MainWindowViewModel : ObservableObject
     /// <summary>Footer navigation entries (app-level pages, not tools).</summary>
     [ObservableProperty]
     private ObservableCollection<object> _footerMenuItems = new();
+
+    /// <summary>Shared update state; the shell banner and Settings "check now" bind to this instance.</summary>
+    public UpdateViewModel Updates { get; }
 
     /// <summary>Quick title-bar toggle between Light and Dark; persists the choice.</summary>
     [RelayCommand]

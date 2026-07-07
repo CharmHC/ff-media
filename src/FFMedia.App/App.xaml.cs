@@ -75,7 +75,14 @@ public partial class App : Application
         var settings = _host.Services.GetRequiredService<FFMedia.Core.Settings.ISettingsService>();
         _host.Services.GetRequiredService<FFMedia.App.Services.ThemeService>().Apply(settings.Current.Theme);
 
-        _host.Services.GetRequiredService<MainWindow>().Show();
+        var mainWindow = _host.Services.GetRequiredService<MainWindow>();
+        mainWindow.Show();
+
+        if (settings.Current.CheckForUpdatesOnStartup)
+        {
+            var updates = _host.Services.GetRequiredService<FFMedia.App.ViewModels.UpdateViewModel>();
+            _ = updates.CheckOnStartupAsync(); // fire-and-forget; swallows+logs its own errors
+        }
     }
 
     private static void ReportFatal(Exception? ex)
