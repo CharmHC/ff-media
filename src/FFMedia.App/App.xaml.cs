@@ -41,6 +41,7 @@ public partial class App : Application
                     FFMedia.App.Services.SnackbarNotificationService>();
                 services.AddSingleton<FFMedia.Core.Updates.IUpdateService,
                     FFMedia.App.Services.VelopackUpdateService>();
+                services.AddSingleton<FFMedia.App.ViewModels.UpdateViewModel>();
                 services.AddTransient<FFMedia.App.ViewModels.SettingsViewModel>();
                 services.AddTransient<FFMedia.App.Views.SettingsPage>();
                 services.AddTransient<FFMedia.App.ViewModels.HistoryViewModel>();
