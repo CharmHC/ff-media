@@ -1,4 +1,5 @@
 # FFMedia
+# <img width="1400" height="500" alt="Cover" src="https://github.com/user-attachments/assets/d7413d62-d135-44c5-a6c4-4eb2f2242c2e" />
 
 An all-in-one **Windows media toolbox**. The first tool is a **YouTube Downloader**
 — paste a URL, pick a format (mp4, mkv, mp3, wav, m4a, opus, flac, …), and download
