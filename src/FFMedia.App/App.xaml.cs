@@ -39,6 +39,8 @@ public partial class App : Application
                 services.AddSingleton<Wpf.Ui.ISnackbarService, Wpf.Ui.SnackbarService>();
                 services.AddSingleton<FFMedia.Core.Notifications.INotificationService,
                     FFMedia.App.Services.SnackbarNotificationService>();
+                services.AddSingleton<FFMedia.Core.Updates.IUpdateService,
+                    FFMedia.App.Services.VelopackUpdateService>();
                 services.AddTransient<FFMedia.App.ViewModels.SettingsViewModel>();
                 services.AddTransient<FFMedia.App.Views.SettingsPage>();
                 services.AddTransient<FFMedia.App.ViewModels.HistoryViewModel>();
