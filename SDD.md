@@ -545,6 +545,11 @@ Schema changes carry a `version` field for forward migration.
 - **Velopack** produces the installer and delta auto-updates.
 - Bundled `yt-dlp.exe` + `ffmpeg.exe` are included in the release package.
 - Release channel + update feed configured in `build/`.
+- **The GitHub repo must be public.** The in-app update check uses
+  `GithubSource(..., accessToken: null, ...)` (anonymous), and GitHub returns **404** to
+  anonymous callers on a *private* repo — surfacing as "Update check failed." A distributed
+  desktop app can't ship a token safely (extractable from the `.exe`), so public is the
+  distribution model. `ChamHC-dev/ff-media` was made public on 2026-07-08 for this reason.
 - Self-contained .NET publish (no framework prerequisite for end users).
 - CI builds on every push; release workflow tags → Velopack pack + publish.
 

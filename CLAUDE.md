@@ -33,6 +33,25 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-08 — Fix: in-app "Update check failed" after first release
+
+- **Symptom:** after installing v1.0.0, Settings → "Check for updates now" showed
+  "Update check failed. See logs." **Root cause (from the Serilog file log at
+  `%AppData%\FFMedia\logs`):** `Velopack.Sources.GithubSource.GetReleases` → **HTTP 404**.
+  The repo `ChamHC-dev/ff-media` was **private**, but the update check runs **anonymously**
+  (`VelopackUpdateService` uses `GithubSource(..., accessToken: null, ...)`); GitHub returns
+  404 (not 403) to anonymous callers on a private repo. Not a code bug — the v1.0.0 release
+  itself was complete (`RELEASES`, `releases.win.json`, full nupkg, Setup.exe all present).
+- **Fix:** made the repo **public** (user-approved). Verified the exact chain the app walks
+  is now anonymous-200: `GET /releases` → 200, and the `releases.win.json` asset → 200. A
+  distributed desktop app can't ship a GitHub token safely (extractable from the `.exe`), so
+  public is the correct distribution model. SDD §15 updated with this requirement.
+- **Note:** the installed app is already on the latest stable (v1.0.0), so "Check for updates
+  now" will now report **"You're up to date"** — to exercise the banner, publish a higher tag
+  (e.g. `v1.0.1`). The `v0.9.0.0` **pre-release** is ignored by the stable channel.
+- **Next:** unchanged — user's headed dry-run of M6 PR 2 (Binaries section, real `yt-dlp -U`,
+  logo surfaces); publish `v1.0.1` when there's a change to ship to see the update loop.
+
 ### 2026-07-08 — M6 Ship v1 (PR 2: binary updates + app logo)
 
 - **Done:** yt-dlp self-update + pinned binaries + app logo. Core gained `IProcessRunner`/
