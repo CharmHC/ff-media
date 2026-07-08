@@ -4,6 +4,7 @@
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="FFMedia" Width="1000" Height="640"
                  Icon="pack://application:,,,/Assets/logo.png"
+                 Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica">
@@ -18,18 +19,9 @@
         </Grid.RowDefinitions>
 
         <ui:TitleBar Grid.Row="0" Title="FFMedia">
-            <ui:TitleBar.Header>
-                <StackPanel Orientation="Horizontal"
-                            HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Image Source="pack://application:,,,/Assets/logo.png"
-                           Height="20" Margin="0,0,8,0" VerticalAlignment="Center" />
-                    <ui:Button Icon="{ui:SymbolIcon WeatherMoon24}"
-                               Appearance="Transparent"
-                               Margin="0,0,8,0"
-                               ToolTip="Toggle light/dark theme"
-                               Command="{Binding ToggleThemeCommand}" />
-                </StackPanel>
-            </ui:TitleBar.Header>
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/Assets/logo.png" />
+            </ui:TitleBar.Icon>
         </ui:TitleBar>
 
         <!-- Update banner: shown only when a newer version is available. -->

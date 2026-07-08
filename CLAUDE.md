@@ -33,6 +33,27 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-08 — Post-v1 UI fixes (dark-mode text, footer icons, title bar)
+
+- **Done:** three shell fixes reported after installing v1.0.0.
+  1. **Dark-mode font was black** — page `TextBlock`s had no explicit `Foreground`, so they
+     inherited WPF's default **black** (fine on light, invisible on dark). `MainWindow`
+     (`FluentWindow`) now sets `Foreground="{DynamicResource TextFillColorPrimaryBrush}"`;
+     inheritance themes all page text and buttons keep their own template foreground. This
+     also makes the (previously black-on-dark) title text visible.
+  2. **History/Settings icons missing** — swapped the raw-glyph `FontIcon`s for WPF-UI
+     `SymbolIcon` (`SymbolRegular.History24`/`Settings24`), which use the bundled icon font
+     (no dependency on an OS-installed Segoe icon font).
+  3. **Title bar** — added the logo at top-left via `ui:TitleBar.Icon` + the "FFMedia"
+     title; **removed the title-bar theme toggle** (theme already lives in Settings → Theme
+     combo). Dropped `MainWindowViewModel`'s now-dead `ToggleThemeCommand` and its unused
+     `ISettingsService`/`ThemeService` ctor deps.
+- **Verified:** Release build **0/0**, **189/189** unit tests pass. **Not verified (headless
+  env):** the actual dark-mode appearance, icon rendering, and title-bar layout — needs a
+  user visual check. SDD → v0.10.1.
+- **Next:** user confirms the three fixes visually; delivered via branch
+  `fix/ui-dark-theme-titlebar-icons` → PR.
+
 ### 2026-07-08 — Fix: in-app "Update check failed" after first release
 
 - **Symptom:** after installing v1.0.0, Settings → "Check for updates now" showed

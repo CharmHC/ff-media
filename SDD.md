@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.10 · **Last updated:** 2026-07-08
+> **Status:** Living document · **Version:** 0.10.1 · **Last updated:** 2026-07-08
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -472,7 +472,11 @@ Schema changes carry a `version` field for forward migration.
 ## 13. UI / UX
 
 - **Shell:** WPF-UI `FluentWindow` with a left **`NavigationView`** listing tools;
-  title-bar theme toggle; Mica backdrop.
+  title bar shows the app logo (`ui:TitleBar.Icon`) + "FFMedia" title at top-left; Mica
+  backdrop. Theme is chosen in **Settings** (no title-bar toggle). The window sets
+  `Foreground="{DynamicResource TextFillColorPrimaryBrush}"` so page text follows the
+  active theme (otherwise plain `TextBlock`s fall back to WPF's default black — invisible
+  in dark mode).
 - **Downloader screen:**
   - URL input + "Add" (accepts multiple / paste-list).
   - Preview cards (thumbnail, title, duration) after probe.
@@ -486,10 +490,11 @@ Schema changes carry a `version` field for forward migration.
 - Accessibility: keyboard navigation, sufficient contrast in both themes.
 
 > **M5 PR 1 note:** the **Settings screen** now exists (footer nav item) with default
-> output folder, max concurrency, and theme controls, backed by `ISettingsService`.
-> A **title-bar theme toggle** (light/dark/system, via WPF-UI `ApplicationThemeManager`)
-> also now exists and applies the persisted theme at startup. Update cadence and binary
-> version display remain planned (M5 PR 2 / M6).
+> output folder, max concurrency, and theme controls (light/dark/system, via WPF-UI
+> `ApplicationThemeManager`), backed by `ISettingsService`; the persisted theme is applied
+> at startup. Update cadence and binary version display remain planned (M5 PR 2 / M6).
+> _(Post-v1 UI fix: the earlier title-bar theme toggle was removed — theme lives only in
+> Settings — and the shell gained the logo/title in the title bar; see Changelog 0.10.1.)_
 
 > **M5 PR 2 note:** **inline presets** are delivered on the Downloader screen — a
 > dropdown (`Presets`/`SelectedPreset`) plus Apply/Delete buttons and a "save current
@@ -661,6 +666,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-08 | 0.10.1 | Post-v1 UI fixes (shell). (1) **Dark-mode text was black:** page `TextBlock`s inherited WPF's default black `Foreground`; the `FluentWindow` now sets `Foreground="{DynamicResource TextFillColorPrimaryBrush}"` so text follows the theme and updates live on theme switch. (2) **Missing footer icons:** History/Settings nav items switched from raw-glyph `FontIcon` to WPF-UI `SymbolIcon` (`SymbolRegular.History24`/`Settings24`, bundled font — no OS-font dependency). (3) **Title bar:** added the logo via `ui:TitleBar.Icon` + "FFMedia" title at top-left; **removed the title-bar theme toggle** (theme already lives in Settings), dropping `MainWindowViewModel`'s now-unused `ToggleThemeCommand` + `ISettingsService`/`ThemeService` deps. Release build 0/0, 189/189 unit tests pass; GUI appearance pending user visual check (headless dev env). §13 updated. |
 | 2026-07-08 | 0.10 | M6 ship v1 (PR 2): yt-dlp self-update + pinned binaries + app logo. Core gains `IProcessRunner`/`ProcessRunner` (`FFMedia.Core.Processes`, the process seam) and `IBinaryUpdateService`/`BinaryUpdateService` (`FFMedia.Core.Binaries`; installed versions via `--version`/`-version`, `yt-dlp -U` self-update, and a GitHub `releases/latest` check for yt-dlp). A singleton `BinaryUpdateViewModel` drives a Settings **Binaries** section (yt-dlp + ffmpeg versions, "Update yt-dlp", "check yt-dlp on startup" toggle) and a fire-and-forget startup check that notifies (never auto-applies). `AppSettings.Version` moves to **3** (`CheckYtDlpForUpdatesOnStartup`, default true). `fetch-binaries.ps1` pins `yt-dlp` **2026.07.04** and ffmpeg BtbN **autobuild-2026-07-07-13-44**, verifying both against a known SHA-256 (throws on mismatch); a Velopack app update re-bundles the pinned yt-dlp, expectedly reverting a prior in-app self-update. `assets/branding/logo.png` → a committed multi-res `app.ico` (`build/make-icon.ps1`), wired as the exe/window/taskbar/installer icon plus in-app (title bar, left of the theme toggle, + welcome page). Post-review fixes (whole-branch review before PR): the GitHub check now surfaces the remote tag only when **strictly newer** than installed (`YtDlpVersion.IsNewer`, pure + unit-tested) rather than on any inequality, the Core `HttpClient` gets an explicit 10 s timeout, and the latest-version failure paths (HTTP error, malformed JSON, installed-is-newer) are now covered by tests. Verified: Release build 0 warnings/0 errors, 189/189 unit tests pass (`Category!=Integration`), pinned `fetch-binaries.ps1` ran and verified clean. **Not yet verified:** a headed GUI smoke of the Binaries section, the real `yt-dlp -U`, and the logo surfaces — pending a user dry-run (headless dev environment). §6/§9/§10/§13/§16/§17/§19 updated; M6 PR 2 delivered, public v1.0.0 tag remains user-initiated. |
 | 2026-07-07 | 0.9 | M6 ship v1 (PR 1): Velopack packaging + app delta auto-update. Explicit `Program.Main` runs `VelopackApp.Build().Run()` before WPF startup. Core `IUpdateService`/`AppUpdateInfo` realized in App by `VelopackUpdateService` (Velopack `UpdateManager` + GitHub `GithubSource`, stable channel, pinned Velopack **1.2.0**; safe no-op when uninstalled/dev). Singleton `UpdateViewModel` drives a dismissible shell update banner (Update & restart / Later) and a Settings "Check for updates now" action + current-version display; `AppSettings.CheckForUpdatesOnStartup` (schema **v2**) gates a fire-and-forget startup check. `build/pack.ps1` (publish self-contained + `vpk pack`, unsigned) + tag-gated `.github/workflows/release.yml` (`vpk upload github`). Verified: solution builds Release 0/0, all 152 unit tests pass, `pack.ps1` produced a real installer + nupkg + `RELEASES` locally (pack machinery proven). **Not yet verified:** the interactive install → update → relaunch loop and a GUI smoke of the banner/Settings controls — pending a user dry-run (headless dev environment). §3/§6/§9/§10/§13/§15/§17 updated; M6 marked in progress (PR 2 — binary updates — pending). |
 | 2026-07-06 | 0.8 | M5 experience (PR 2): `IPresetService`/`IHistoryService`/`INotificationService` realized. JSON-backed `PresetService`/`HistoryService` (`presets.json`/`history.json`, `Changed` events); module `PresetMapping` (de)serializes `DownloadConfig` to an opaque payload string (tolerant on malformed/blank input); `DownloaderViewModel` gains save/apply/delete preset commands + an inline Presets section on the Downloader page. `DownloadManager` gains optional `IHistoryService?`/`INotificationService?` ctor params and appends history + notifies on `Completed`, notifies only on `Failed`, does neither on `Canceled` — dispatched inside `RunAndTrackAsync` before the idle signal, swallowed on failure so a broken sink can't break the queue. App gains `SnackbarNotificationService` (WPF-UI `SnackbarPresenter`) and a **History** screen (footer nav item: filter, open file/folder, clear). Re-download from history explicitly deferred (needs cross-page seeding seam + a config-carrying `HistoryEntry`). §6/§7.2/§13/§17/§19 updated; M5 marked complete. |

@@ -2,10 +2,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
-using FFMedia.App.Services;
 using FFMedia.App.Views;
-using FFMedia.Core.Settings;
 using FFMedia.Core.Tools;
 using Wpf.Ui.Controls;
 
@@ -13,23 +10,14 @@ namespace FFMedia.App.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject
 {
-    private readonly ISettingsService _settings;
-    private readonly ThemeService _theme;
-
     public MainWindowViewModel(
         IToolRegistry registry,
         IEnumerable<IToolPage> pages,
-        ISettingsService settings,
-        ThemeService theme,
         UpdateViewModel updates)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(pages);
-        ArgumentNullException.ThrowIfNull(settings);
-        ArgumentNullException.ThrowIfNull(theme);
         ArgumentNullException.ThrowIfNull(updates);
-        _settings = settings;
-        _theme = theme;
         Updates = updates;
 
         var pageById = pages.ToDictionary(p => p.ToolId, p => p.PageType);
@@ -56,13 +44,13 @@ public partial class MainWindowViewModel : ObservableObject
             new NavigationViewItem
             {
                 Content = "History",
-                Icon = new FontIcon { Glyph = "" }, // Segoe Fluent "History"
+                Icon = new SymbolIcon { Symbol = SymbolRegular.History24 },
                 TargetPageType = typeof(HistoryPage),
             },
             new NavigationViewItem
             {
                 Content = "Settings",
-                Icon = new FontIcon { Glyph = "" }, // Segoe Fluent settings gear
+                Icon = new SymbolIcon { Symbol = SymbolRegular.Settings24 },
                 TargetPageType = typeof(SettingsPage),
             },
         };
@@ -78,13 +66,4 @@ public partial class MainWindowViewModel : ObservableObject
 
     /// <summary>Shared update state; the shell banner and Settings "check now" bind to this instance.</summary>
     public UpdateViewModel Updates { get; }
-
-    /// <summary>Quick title-bar toggle between Light and Dark; persists the choice.</summary>
-    [RelayCommand]
-    private void ToggleTheme()
-    {
-        var next = _settings.Current.Theme == AppTheme.Dark ? AppTheme.Light : AppTheme.Dark;
-        _theme.Apply(next);
-        _settings.Save(_settings.Current with { Theme = next });
-    }
 }
