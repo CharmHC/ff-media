@@ -9,6 +9,12 @@ the roadmap.
 Under the hood, FFMedia is a polished orchestrator over **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**
 (extraction/download) and **[FFmpeg](https://ffmpeg.org/)** (transcode/mux/trim).
 
+> [!NOTE]
+> **Personal project.** FFMedia is built primarily for my own personal use and shared
+> publicly in case it's useful to others. It is **not** a commercial or officially
+> supported product — there's no guarantee of ongoing maintenance, support, or that
+> issues / feature requests will be addressed. Use it as-is (see [no warranty](LICENSE)).
+
 ## Status
 
 🚧 Early development. See **[SDD.md](SDD.md)** — the single source of truth for
@@ -45,6 +51,9 @@ you redistribute FFMedia's installer, you must comply with the GPL for that bina
 
 ## Legal & disclaimer
 
+- **Personal project, no support commitment.** FFMedia is developed primarily for the
+  author's personal use and published as-is; there's no promise of maintenance, support,
+  or that bug reports / feature requests will be acted on.
 - **Use responsibly.** FFMedia is a general-purpose media tool. **You** are
   responsible for complying with copyright, content owners' rights, and the terms
   of service of the sites you download from. Only download content you have the

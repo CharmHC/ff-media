@@ -33,6 +33,14 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-08 — Docs: "personal project" scope note
+
+- **Done:** added a note that FFMedia, though public, is developed primarily for the author's
+  personal use and shipped as-is (no maintenance/support commitment). Placed a `> [!NOTE]`
+  callout under the README intro + a bullet in the README Legal section, and a scope note in
+  SDD §1. SDD → v0.12.1. No code change.
+- **Next:** none pending for this; unchanged from prior (user's headed dry-run of the M6/UI work).
+
 ### 2026-07-08 — Post-v1 UI fixes (dark-mode text, footer icons, title bar)
 
 - **Done:** three shell fixes reported after installing v1.0.0.
