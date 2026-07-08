@@ -63,9 +63,33 @@ _Newest first. One entry per completed task/session._
      opens its parent folder), plus an `Error` notification if `Process.Start` throws.
 - **Verified:** Release build **0/0**, **189/189** unit tests pass. **Not verified (headless
   env):** the actual dark-mode appearance, all icon rendering, title-bar layout, settings
-  auto-save UX, and the History notifications — needs a user visual check. SDD → v0.10.1.
+  auto-save UX, and the History notifications — needs a user visual check. SDD → v0.12.
 - **Next:** user confirms the fixes visually; delivered via branch
   `fix/ui-dark-theme-titlebar-icons` → PR #11.
+
+### 2026-07-08 — Public-repo audit + licensing & disclaimers
+
+- **Context:** repo was made public (to fix anonymous Velopack update checks), so audited
+  for anything that shouldn't be exposed and for missing legal disclaimers.
+- **Audit result (clean):** no secrets/credentials/keys in tracked files (only false
+  positives like `CancellationToken`, built-in `secrets.GITHUB_TOKEN`); no machine paths
+  (`C:\Users\…`) or PII in source; `.gitignore` correctly excludes binaries/logs/artifacts.
+  Docs are professional (the "DRM/bypass" hits are appropriate non-goal disclaimers or the
+  `-ExecutionPolicy Bypass` flag). Binaries are git-ignored, so the **repo** ships no GPL
+  binary — only the **release installer** does.
+- **Done:** added **`LICENSE`** (MIT, user-chosen) and **`THIRD-PARTY-NOTICES.md`** (yt-dlp
+  Unlicense; bundled FFmpeg GPL-3.0 `win64-gpl` build with source links + trademark/
+  non-affiliation notes; NuGet deps + licenses). Expanded README **License** + **Legal &
+  disclaimer** sections (responsible use, no DRM circumvention, non-affiliation, no-warranty)
+  and fixed the tech-stack (FFMpegCore is planned, not yet used). SDD §16 + Changelog → v0.11.
+- **Advice pending user decision (asked, chose "advise me"):** keep the **GPL** ffmpeg build
+  (current; supports x264/x265 re-encode incl. `PreciseCut`, GPL notice is easy to satisfy)
+  vs switch to the **LGPL** build (lighter obligations, but loses GPL-only encoders). My
+  recommendation: **keep GPL + comply via the notices file** unless minimizing GPL exposure
+  matters more than re-encode support. `fetch-binaries.ps1` left unchanged.
+- **Resolved:** user chose to **keep the GPL ffmpeg build** (comply via `THIRD-PARTY-NOTICES.md`);
+  `fetch-binaries.ps1` unchanged. Note: the personal git-author email is in commit history
+  (standard; only changeable going forward via a noreply address).
 
 ### 2026-07-08 — Fix: in-app "Update check failed" after first release
 

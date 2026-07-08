@@ -16,8 +16,9 @@ architecture, scope, and milestones.
 
 ## Tech stack
 
-C# / .NET 9 · WPF + WPF-UI · CommunityToolkit.Mvvm · YoutubeDLSharp · FFMpegCore ·
-Serilog · Velopack.
+C# / .NET 9 · WPF + WPF-UI · CommunityToolkit.Mvvm · YoutubeDLSharp · Serilog ·
+Velopack. (FFmpeg is orchestrated as a bundled external executable; an FFMpegCore
+wrapper is planned for future in-app processing tools.)
 
 ## Roadmap (high level)
 
@@ -31,7 +32,27 @@ Serilog · Velopack.
 | M5 | Settings, presets, history, theming |
 | M6 | Installer + auto-update, v1 release |
 
-## Legal
+## License
 
-FFMedia is a general-purpose media tool. Users are responsible for complying with
-content owners' rights and the terms of service of the sites they download from.
+FFMedia's own source code is released under the **[MIT License](LICENSE)**.
+
+FFMedia bundles third-party executables (**FFmpeg**, **yt-dlp**) and libraries that
+are licensed separately — see **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)**.
+Note in particular that the bundled **FFmpeg** binary is distributed under the
+**GNU GPL v3**; that license governs the FFmpeg binary, not FFMedia's own code. If
+you redistribute FFMedia's installer, you must comply with the GPL for that binary
+(the notices file explains how).
+
+## Legal & disclaimer
+
+- **Use responsibly.** FFMedia is a general-purpose media tool. **You** are
+  responsible for complying with copyright, content owners' rights, and the terms
+  of service of the sites you download from. Only download content you have the
+  right to (e.g. your own uploads, public-domain, or content you are licensed to).
+- **No DRM circumvention.** FFMedia does not, and is not intended to, bypass DRM,
+  paywalls, or access controls.
+- **No affiliation.** FFMedia is an independent project and is **not** affiliated
+  with, endorsed by, or sponsored by YouTube, Google, the FFmpeg project, or the
+  yt-dlp project. All trademarks belong to their respective owners.
+- **No warranty.** The software is provided "as is", without warranty of any kind;
+  see the [MIT License](LICENSE) for the full disclaimer.
