@@ -12,7 +12,7 @@ public class AppSettingsTests
     public void Default_HasExpectedValues()
     {
         var d = AppSettings.Default;
-        Assert.Equal(2, d.Version);
+        Assert.Equal(3, d.Version);
         Assert.Equal(3, d.MaxConcurrency);
         Assert.Equal(AppTheme.System, d.Theme);
         Assert.EndsWith(Path.Combine("Videos", "FFMedia"), d.DefaultOutputFolder);

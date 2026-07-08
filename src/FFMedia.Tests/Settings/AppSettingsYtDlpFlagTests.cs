@@ -1,5 +1,5 @@
+using System;
 using System.IO;
-using System.Text.Json;
 using FFMedia.Core.Persistence;
 using FFMedia.Core.Settings;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,28 +7,27 @@ using Xunit;
 
 namespace FFMedia.Tests.Settings;
 
-public class AppSettingsUpdateFlagTests
+public class AppSettingsYtDlpFlagTests
 {
     [Fact]
-    public void Default_EnablesStartupUpdateCheck_AndIsVersion3()
+    public void Default_EnablesYtDlpStartupCheck_AndIsVersion3()
     {
         var d = AppSettings.Default;
-        Assert.True(d.CheckForUpdatesOnStartup);
+        Assert.True(d.CheckYtDlpForUpdatesOnStartup);
         Assert.Equal(3, d.Version);
     }
 
     [Fact]
-    public void LoadingV1FileWithoutFlag_DefaultsFlagToTrue()
+    public void LoadingV2FileWithoutFlag_DefaultsFlagToTrue()
     {
-        // Simulate an existing v1 settings.json written before the flag existed.
         var path = Path.Combine(Path.GetTempPath(), "ffmedia-tests", Guid.NewGuid().ToString("N"), "settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, """{ "Version": 1, "MaxConcurrency": 3, "Theme": "System" }""");
+        File.WriteAllText(path, """{ "Version": 2, "MaxConcurrency": 3, "Theme": "System", "CheckForUpdatesOnStartup": true }""");
 
         var store = new JsonStore<AppSettings>(path, NullLogger.Instance);
         var loaded = store.Load(() => AppSettings.Default);
 
-        Assert.True(loaded.CheckForUpdatesOnStartup); // missing field → default true
+        Assert.True(loaded.CheckYtDlpForUpdatesOnStartup); // missing field → default true
     }
 
     [Fact]
@@ -36,7 +35,7 @@ public class AppSettingsUpdateFlagTests
     {
         var path = Path.Combine(Path.GetTempPath(), "ffmedia-tests", Guid.NewGuid().ToString("N"), "settings.json");
         var store = new JsonStore<AppSettings>(path, NullLogger.Instance);
-        var original = AppSettings.Default with { CheckForUpdatesOnStartup = false };
+        var original = AppSettings.Default with { CheckYtDlpForUpdatesOnStartup = false };
 
         store.Save(original);
 

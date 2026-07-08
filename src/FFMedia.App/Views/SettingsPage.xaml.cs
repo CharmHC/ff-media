@@ -9,5 +9,13 @@ public partial class SettingsPage : Page
     {
         DataContext = viewModel;
         InitializeComponent();
+
+        Loaded += (_, _) =>
+        {
+            if (DataContext is FFMedia.App.ViewModels.SettingsViewModel vm)
+            {
+                vm.Binaries.RefreshVersionsCommand.Execute(null);
+            }
+        };
     }
 }

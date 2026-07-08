@@ -42,6 +42,7 @@ public partial class App : Application
                 services.AddSingleton<FFMedia.Core.Updates.IUpdateService,
                     FFMedia.App.Services.VelopackUpdateService>();
                 services.AddSingleton<FFMedia.App.ViewModels.UpdateViewModel>();
+                services.AddSingleton<FFMedia.App.ViewModels.BinaryUpdateViewModel>();
                 services.AddTransient<FFMedia.App.ViewModels.SettingsViewModel>();
                 services.AddTransient<FFMedia.App.Views.SettingsPage>();
                 services.AddTransient<FFMedia.App.ViewModels.HistoryViewModel>();
@@ -82,6 +83,12 @@ public partial class App : Application
         {
             var updates = _host.Services.GetRequiredService<FFMedia.App.ViewModels.UpdateViewModel>();
             _ = updates.CheckOnStartupAsync(); // fire-and-forget; swallows+logs its own errors
+        }
+
+        if (settings.Current.CheckYtDlpForUpdatesOnStartup)
+        {
+            var binaries = _host.Services.GetRequiredService<FFMedia.App.ViewModels.BinaryUpdateViewModel>();
+            _ = binaries.CheckOnStartupAsync(); // fire-and-forget; swallows+logs its own errors
         }
     }
 

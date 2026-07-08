@@ -34,6 +34,36 @@
         <TextBlock Text="{Binding Updates.StatusMessage}"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,6,0,0" />
 
+        <TextBlock Text="Binaries" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,4" />
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="yt-dlp" VerticalAlignment="Center" MinWidth="64" />
+            <TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0"
+                       Text="{Binding Binaries.YtDlpVersion}"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <ui:Button Grid.Column="2" Content="Update yt-dlp"
+                       Command="{Binding Binaries.UpdateYtDlpCommand}"
+                       IsEnabled="{Binding Binaries.CanUpdate}" />
+        </Grid>
+        <Grid Margin="0,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="ffmpeg" VerticalAlignment="Center" MinWidth="64" />
+            <TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0"
+                       Text="{Binding Binaries.FfmpegVersion, StringFormat='{}{0}  (updates with the app)'}"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Grid>
+        <ui:ToggleSwitch Content="Check yt-dlp for updates on startup" Margin="0,10,0,0"
+                         IsChecked="{Binding CheckYtDlpForUpdatesOnStartup, Mode=TwoWay}" />
+        <TextBlock Text="{Binding Binaries.StatusMessage}"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,6,0,0" />
+
         <ui:Button Content="Save" Appearance="Primary" Margin="0,20,0,0" HorizontalAlignment="Left" Command="{Binding SaveCommand}" />
         <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,10,0,0" />
     </StackPanel>

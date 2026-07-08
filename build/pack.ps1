@@ -32,6 +32,7 @@ vpk pack `
     --packDir $publishDir `
     --mainExe FFMedia.App.exe `
     --packTitle 'FFMedia' `
+    --icon (Join-Path $root 'assets/branding/app.ico') `
     --outputDir $releaseDir
 
 Write-Host "`nVelopack release created in $releaseDir" -ForegroundColor Green

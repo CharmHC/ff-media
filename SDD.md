@@ -1,6 +1,6 @@
 # FFMedia — Software Design Document (SDD)
 
-> **Status:** Living document · **Version:** 0.9 · **Last updated:** 2026-07-07
+> **Status:** Living document · **Version:** 0.10 · **Last updated:** 2026-07-08
 >
 > **This document is the single source of truth for the FFMedia project.** Any
 > architectural decision, scope change, or convention lives here first. Code and
@@ -225,6 +225,16 @@ All defined in `FFMedia.Core`, injected via DI, and fakeable in tests.
 > installed Velopack app (e.g. running via `dotnet run`/dev), so nothing crashes
 > outside an installed context.
 
+> **M6 PR 2 note:** `IProcessRunner`/`ProcessRunner` (`FFMedia.Core.Processes`) and
+> `IBinaryUpdateService`/`BinaryUpdateService` (`FFMedia.Core.Binaries`) are now
+> **realized**. `IProcessRunner` is the generic child-process seam (launch, stream
+> stdout/stderr, honor `CancellationToken`) that makes binary orchestration testable
+> without real binaries. `BinaryUpdateService` reads the installed `yt-dlp`/`ffmpeg`
+> versions via `--version`/`-version` (the latter parsed by the pure
+> `FfmpegVersionParsing`), self-updates yt-dlp via `yt-dlp -U`, and additionally
+> queries the GitHub API (`releases/latest` on `yt-dlp/yt-dlp`) to report whether a
+> newer yt-dlp is available (see §9).
+
 ---
 
 ## 7. YouTube Downloader Module (detailed)
@@ -356,6 +366,13 @@ directly (as opposed to delegating to yt-dlp):
   - **yt-dlp** additionally supports in-app self-update (`yt-dlp -U`) because it
     breaks frequently against YouTube changes and must update independently of app
     releases. Update checks are user-initiated or on a configurable schedule.
+- **Pinned versions (v1):** `yt-dlp` **2026.07.04** (SHA-256
+  `52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8`) and `ffmpeg`
+  from the BtbN builds, tag **autobuild-2026-07-07-13-44**, asset
+  `ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip` (zip SHA-256
+  `f9fdfc417d5091cb3a3487b484ee824bce4fd6fa92dc85a412142f2911b7a22c`). Both are
+  verified by `build/fetch-binaries.ps1` (throws on hash mismatch), satisfying the
+  "integrity checks in the build script" requirement in §16.
 
 > **M6 PR 1 note:** the **app** update path is now **realized**. `VelopackUpdateService`
 > performs a Velopack check-on-startup (gated by `AppSettings.CheckForUpdatesOnStartup`,
@@ -365,6 +382,17 @@ directly (as opposed to delegating to yt-dlp):
 > "Later") that downloads and applies the update via Velopack, then restarts the app.
 > **yt-dlp self-update** (`IProcessRunner` + a dedicated `IBinaryUpdateService`) is
 > **not** part of this PR — it's scoped to **M6 PR 2**, unchanged from the plan above.
+
+> **M6 PR 2 note:** the **yt-dlp** update path is now **realized**. `BinaryUpdateService`
+> self-updates via `yt-dlp -U` and additionally checks the GitHub API
+> (`releases/latest` on `yt-dlp/yt-dlp`) so the Settings screen (§13) can show whether a
+> newer yt-dlp is available before the user updates. The check surfaces the remote tag only
+> when it is **strictly newer** than the installed one (`YtDlpVersion.IsNewer`, a pure
+> component-wise compare of the dot-separated date tags), so a locally-nightly install never
+> triggers a perpetual "update available" nag. `pack.ps1`/`release.yml` (§15)
+> re-bundle the **pinned** yt-dlp (§9) on every app release, so a fresh app update will
+> **revert a prior in-app yt-dlp self-update** back to the pinned version — expected
+> behavior; the user can simply re-run "Update yt-dlp" afterward.
 
 ---
 
@@ -389,6 +417,10 @@ Schema changes carry a `version` field for forward migration.
 > **M6 PR 1 note:** `AppSettings.Version` moves to **2** with the addition of
 > `CheckForUpdatesOnStartup` (`bool`, default `true`), covered by unit tests
 > (`AppSettingsUpdateFlagTests`).
+
+> **M6 PR 2 note:** `AppSettings.Version` moves to **3** with the addition of
+> `CheckYtDlpForUpdatesOnStartup` (`bool`, default `true`), covered by unit tests
+> (`AppSettingsYtDlpFlagTests`).
 
 ---
 
@@ -480,6 +512,18 @@ Schema changes carry a `version` field for forward migration.
 > interactive install → update → relaunch loop and a GUI smoke of these controls are
 > **pending a user dry-run** in the headless dev/CI environment (see Changelog 0.9).
 
+> **M6 PR 2 note:** the **Settings screen** gains a **Binaries** section — a
+> singleton `BinaryUpdateViewModel` displays the installed `yt-dlp`/`ffmpeg` versions,
+> an "Update yt-dlp" action (`yt-dlp -U`), and a "check yt-dlp for updates on startup"
+> toggle (bound to `AppSettings.CheckYtDlpForUpdatesOnStartup`); a fire-and-forget
+> startup check **notifies only** (via `INotificationService`) when a newer yt-dlp is
+> available — it never auto-applies the update. Separately, the app now has a real
+> **logo**: `assets/branding/logo.png` is converted to a committed multi-res
+> `app.ico` (`build/make-icon.ps1`) and wired as the exe/window/taskbar/installer icon,
+> plus in-app in the **title bar** (left of the theme toggle) and the welcome page. Both the Binaries
+> section and the real `yt-dlp -U` are verified by build + unit tests only — a headed
+> GUI smoke is **pending a user dry-run** (see Changelog 0.10).
+
 ---
 
 ## 14. Testing Strategy
@@ -530,6 +574,11 @@ Schema changes carry a `version` field for forward migration.
 - External binaries are pinned to known versions and fetched over HTTPS with
   integrity checks in the build script.
 
+> **M6 PR 2 note (realized):** `build/fetch-binaries.ps1` pins `yt-dlp` **2026.07.04**
+> and the `ffmpeg` BtbN build **autobuild-2026-07-07-13-44**, downloads both over
+> HTTPS, and **verifies each against a known SHA-256** before use (throws on
+> mismatch) — see the pinned values in §9.
+
 ---
 
 ## 17. Milestones & Roadmap
@@ -544,7 +593,7 @@ Each milestone is a **vertical, shippable increment**.
 | **M3** | Queue | ✅ delivered (branch `feat/m3-queue`) — Download **queue** (`IDownloadManager`/`DownloadJob`, module-owned) with bounded **concurrency** (`SemaphoreSlim` cap 3), transient-only retry with exponential backoff, and **playlist/channel** expansion at add-time (one job per entry). |
 | **M4** | Processing | ✅ delivered (branch `feat/m4-processing`) — **Trim/clip** (fast keyframe cut or precise re-encode), **subtitles** (video-only, manual + auto), **metadata + thumbnail** embedding. |
 | **M5** | Experience | ✅ delivered (branches `feat/m5-foundation`, `feat/m5-presets-history`) — **PR 1:** settings persistence + theming foundation (`JsonStore<T>`, `ISettingsService`, Settings screen, dark/light/system theming). **PR 2:** presets (`IPresetService`, inline Downloader UI), history (`IHistoryService`, `DownloadManager` completion hook, History screen), and in-app snackbar notifications (`INotificationService`/`SnackbarNotificationService`). Re-download from history deferred (§19). |
-| **M6** | Ship v1 | 🚧 **in progress** (branch `feat/m6-packaging-autoupdate`) — **PR 1 delivered:** Velopack packaging (`build/pack.ps1`, tag-gated `release.yml`) + app delta auto-update (`IUpdateService`/`VelopackUpdateService`, shell update banner, Settings toggle + check-now). **PR 2 pending:** yt-dlp/ffmpeg binary update flow, then the public **v1 release**. |
+| **M6** | Ship v1 | 🚧 **in progress** — **PR 1 delivered** (branch `feat/m6-packaging-autoupdate`): Velopack packaging (`build/pack.ps1`, tag-gated `release.yml`) + app delta auto-update (`IUpdateService`/`VelopackUpdateService`, shell update banner, Settings toggle + check-now). **PR 2 delivered** (branch `feat/m6-binary-updates`): yt-dlp self-update (`IProcessRunner`/`IBinaryUpdateService`), Settings **Binaries** section, pinned + SHA-256-verified `fetch-binaries.ps1`, and the app logo. **Remaining:** the public **v1.0.0** release tag stays **user-initiated**. |
 | **M7** | *(future)* | Second tool module (video **standardize/merge**) — validates the modular seam. |
 
 ---
@@ -570,7 +619,10 @@ Each milestone is a **vertical, shippable increment**.
 - ~~Pause/resume of in-flight downloads~~ — **resolved (M3): deferred.** M3 ships
   cancel-only (per-job + cancel-all); pause/resume remains a stretch goal, revisit
   post-v1 if there's demand.
-- Which yt-dlp/ffmpeg versions to pin for v1 — set during M2, record in §9.
+- ~~Which yt-dlp/ffmpeg versions to pin for v1~~ — **resolved (M6 PR 2):** `yt-dlp`
+  **2026.07.04**, `ffmpeg` BtbN **autobuild-2026-07-07-13-44** (asset
+  `ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip`); both SHA-256-verified in
+  `build/fetch-binaries.ps1`. See §9 for the hashes.
 - **Re-download deferred (M5 PR 2).** The History screen's "re-download" row-action
   (§13) was **not** implemented this PR. It needs (a) a cross-page seeding seam — the
   Downloader screen's `DownloaderViewModel` is DI-**transient**, so there's no existing
@@ -604,6 +656,7 @@ Each milestone is a **vertical, shippable increment**.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-08 | 0.10 | M6 ship v1 (PR 2): yt-dlp self-update + pinned binaries + app logo. Core gains `IProcessRunner`/`ProcessRunner` (`FFMedia.Core.Processes`, the process seam) and `IBinaryUpdateService`/`BinaryUpdateService` (`FFMedia.Core.Binaries`; installed versions via `--version`/`-version`, `yt-dlp -U` self-update, and a GitHub `releases/latest` check for yt-dlp). A singleton `BinaryUpdateViewModel` drives a Settings **Binaries** section (yt-dlp + ffmpeg versions, "Update yt-dlp", "check yt-dlp on startup" toggle) and a fire-and-forget startup check that notifies (never auto-applies). `AppSettings.Version` moves to **3** (`CheckYtDlpForUpdatesOnStartup`, default true). `fetch-binaries.ps1` pins `yt-dlp` **2026.07.04** and ffmpeg BtbN **autobuild-2026-07-07-13-44**, verifying both against a known SHA-256 (throws on mismatch); a Velopack app update re-bundles the pinned yt-dlp, expectedly reverting a prior in-app self-update. `assets/branding/logo.png` → a committed multi-res `app.ico` (`build/make-icon.ps1`), wired as the exe/window/taskbar/installer icon plus in-app (title bar, left of the theme toggle, + welcome page). Post-review fixes (whole-branch review before PR): the GitHub check now surfaces the remote tag only when **strictly newer** than installed (`YtDlpVersion.IsNewer`, pure + unit-tested) rather than on any inequality, the Core `HttpClient` gets an explicit 10 s timeout, and the latest-version failure paths (HTTP error, malformed JSON, installed-is-newer) are now covered by tests. Verified: Release build 0 warnings/0 errors, 189/189 unit tests pass (`Category!=Integration`), pinned `fetch-binaries.ps1` ran and verified clean. **Not yet verified:** a headed GUI smoke of the Binaries section, the real `yt-dlp -U`, and the logo surfaces — pending a user dry-run (headless dev environment). §6/§9/§10/§13/§16/§17/§19 updated; M6 PR 2 delivered, public v1.0.0 tag remains user-initiated. |
 | 2026-07-07 | 0.9 | M6 ship v1 (PR 1): Velopack packaging + app delta auto-update. Explicit `Program.Main` runs `VelopackApp.Build().Run()` before WPF startup. Core `IUpdateService`/`AppUpdateInfo` realized in App by `VelopackUpdateService` (Velopack `UpdateManager` + GitHub `GithubSource`, stable channel, pinned Velopack **1.2.0**; safe no-op when uninstalled/dev). Singleton `UpdateViewModel` drives a dismissible shell update banner (Update & restart / Later) and a Settings "Check for updates now" action + current-version display; `AppSettings.CheckForUpdatesOnStartup` (schema **v2**) gates a fire-and-forget startup check. `build/pack.ps1` (publish self-contained + `vpk pack`, unsigned) + tag-gated `.github/workflows/release.yml` (`vpk upload github`). Verified: solution builds Release 0/0, all 152 unit tests pass, `pack.ps1` produced a real installer + nupkg + `RELEASES` locally (pack machinery proven). **Not yet verified:** the interactive install → update → relaunch loop and a GUI smoke of the banner/Settings controls — pending a user dry-run (headless dev environment). §3/§6/§9/§10/§13/§15/§17 updated; M6 marked in progress (PR 2 — binary updates — pending). |
 | 2026-07-06 | 0.8 | M5 experience (PR 2): `IPresetService`/`IHistoryService`/`INotificationService` realized. JSON-backed `PresetService`/`HistoryService` (`presets.json`/`history.json`, `Changed` events); module `PresetMapping` (de)serializes `DownloadConfig` to an opaque payload string (tolerant on malformed/blank input); `DownloaderViewModel` gains save/apply/delete preset commands + an inline Presets section on the Downloader page. `DownloadManager` gains optional `IHistoryService?`/`INotificationService?` ctor params and appends history + notifies on `Completed`, notifies only on `Failed`, does neither on `Canceled` — dispatched inside `RunAndTrackAsync` before the idle signal, swallowed on failure so a broken sink can't break the queue. App gains `SnackbarNotificationService` (WPF-UI `SnackbarPresenter`) and a **History** screen (footer nav item: filter, open file/folder, clear). Re-download from history explicitly deferred (needs cross-page seeding seam + a config-carrying `HistoryEntry`). §6/§7.2/§13/§17/§19 updated; M5 marked complete. |
 | 2026-07-06 | 0.7 | M5 foundation (PR 1): generic `JsonStore<T>` (atomic write, corrupt-file quarantine) + `AppSettings`/`ISettingsService` (JSON at %AppData%\FFMedia\settings.json). `AddFFMediaCore` gains a `dataDirectory` param and registers `ISettingsService`. App gains a `ThemeService` (dark/light/system via WPF-UI), a Settings screen (default folder, max concurrency, theme) as a footer nav item, a title-bar theme toggle, and applies the persisted theme at startup. Settings wired into behavior: downloader output folder seeded from settings; `DownloadManager` concurrency cap read from settings. §6/§10/§12/§13/§17/§19 updated. |

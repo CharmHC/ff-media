@@ -3,6 +3,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="FFMedia" Width="1000" Height="640"
+                 Icon="pack://application:,,,/Assets/logo.png"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica">
@@ -18,11 +19,16 @@
 
         <ui:TitleBar Grid.Row="0" Title="FFMedia">
             <ui:TitleBar.Header>
-                <ui:Button Icon="{ui:SymbolIcon WeatherMoon24}"
-                           Appearance="Transparent"
-                           HorizontalAlignment="Right" Margin="0,0,8,0"
-                           ToolTip="Toggle light/dark theme"
-                           Command="{Binding ToggleThemeCommand}" />
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Image Source="pack://application:,,,/Assets/logo.png"
+                           Height="20" Margin="0,0,8,0" VerticalAlignment="Center" />
+                    <ui:Button Icon="{ui:SymbolIcon WeatherMoon24}"
+                               Appearance="Transparent"
+                               Margin="0,0,8,0"
+                               ToolTip="Toggle light/dark theme"
+                               Command="{Binding ToggleThemeCommand}" />
+                </StackPanel>
             </ui:TitleBar.Header>
         </ui:TitleBar>
 

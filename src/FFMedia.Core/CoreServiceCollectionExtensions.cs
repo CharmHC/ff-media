@@ -1,6 +1,8 @@
+using System.Net.Http;
 using FFMedia.Core.Binaries;
 using FFMedia.Core.History;
 using FFMedia.Core.Presets;
+using FFMedia.Core.Processes;
 using FFMedia.Core.Settings;
 using FFMedia.Core.Tools;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +25,12 @@ public static class CoreServiceCollectionExtensions
 
         services.AddSingleton<IToolRegistry, ToolRegistry>();
         services.AddSingleton<IBinaryProvider>(_ => new BundledBinaryProvider(binariesDirectory));
+        services.AddSingleton<IProcessRunner, ProcessRunner>();
+        services.AddSingleton<IBinaryUpdateService>(sp => new BinaryUpdateService(
+            sp.GetRequiredService<IProcessRunner>(),
+            sp.GetRequiredService<IBinaryProvider>(),
+            new HttpClient { Timeout = TimeSpan.FromSeconds(10) },
+            sp.GetService<ILogger<BinaryUpdateService>>() ?? NullLogger<BinaryUpdateService>.Instance));
         services.AddSingleton<ISettingsService>(sp => new SettingsService(
             dataDirectory,
             sp.GetService<ILogger<SettingsService>>() ?? NullLogger<SettingsService>.Instance));
