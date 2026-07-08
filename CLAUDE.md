@@ -33,6 +33,29 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-08 — M6 Ship v1 (PR 2: binary updates + app logo)
+
+- **Done:** yt-dlp self-update + pinned binaries + app logo. Core gained `IProcessRunner`/
+  `ProcessRunner` (the process seam, SDD §6) and `IBinaryUpdateService`/`BinaryUpdateService`
+  (installed versions via `--version`/`-version`, `yt-dlp -U` self-update, and a GitHub
+  latest-version check). A singleton `BinaryUpdateViewModel` drives a Settings **Binaries**
+  section (yt-dlp + ffmpeg versions, "Update yt-dlp", "check yt-dlp on startup" toggle) and a
+  fire-and-forget startup check that notifies (never auto-applies). `AppSettings` → schema
+  **v3** (`CheckYtDlpForUpdatesOnStartup`, default true). `fetch-binaries.ps1` now pins
+  yt-dlp **2026.07.04** and ffmpeg BtbN **autobuild-2026-07-07-13-44** and **verifies SHA-256**
+  (throws on mismatch). `logo.png` moved to `assets/branding/`, converted to a committed
+  multi-res `app.ico` (via `build/make-icon.ps1`), and wired as the exe/window/taskbar/
+  installer icon + in-app branding (nav header + welcome page). **Verified:** Release build
+  0/0, all **172/172** unit tests pass (`Category!=Integration`), pinned `fetch-binaries.ps1`
+  runs and verifies clean. **Not verified (pending user dry-run):** headed GUI smoke of the
+  Binaries section, the real `yt-dlp -U`, and the logo surfaces. SDD → v0.10.
+- **Decisions:** yt-dlp self-update via `yt-dlp -U`; ffmpeg has no self-update (rides app
+  releases); startup check notifies only; both binaries pinned + hash-verified (ffmpeg hash
+  computed once from the pinned zip); logo used everywhere. App-layer VMs verified by build +
+  manual per the M5/M6 precedent.
+- **Next:** user performs the headed dry-run; the public **v1.0.0** tag (machinery proven in
+  PR 1) is user-initiated.
+
 ### 2026-07-07 — M6 Ship v1 (PR 1: packaging + app auto-update)
 
 - **Done:** Velopack packaging + delta auto-update. Explicit `Program.Main` runs
