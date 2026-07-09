@@ -47,6 +47,7 @@ public partial class App : Application
                 services.AddTransient<FFMedia.App.Views.SettingsPage>();
                 services.AddTransient<FFMedia.App.ViewModels.HistoryViewModel>();
                 services.AddTransient<FFMedia.App.Views.HistoryPage>();
+                services.AddTransient<FFMedia.App.Views.WelcomePage>();
                 services.AddSingleton<MainWindowViewModel>();
                 services.AddSingleton<MainWindow>();
             })

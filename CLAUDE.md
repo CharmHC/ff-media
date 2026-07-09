@@ -68,6 +68,28 @@ _Newest first. One entry per completed task/session._
 - **Next:** user reviews the spec → then `writing-plans` for the M7 PR 1 (engine) implementation
   plan. Delivered via branch `docs/m7-video-merger-design` → PR.
 
+### 2026-07-10 — Post-v1 UI fixes round 2 (dark-mode page text, blank launch content)
+
+- **Two bugs reported after installing v1:**
+  1. **Dark-mode text still black** on page content ("YouTube Downloader" header, "Output:",
+     "Container:", Settings labels, …). **Root cause:** the v0.12 fix set `FluentWindow.Foreground`,
+     which themes only the chrome (title bar / nav pane) — WPF's `Frame` (which `NavigationView`
+     hosts pages in) **isolates property-value inheritance**, so it never reaches page content.
+     WPF-UI 4.3.0 ships **no implicit keyless `TextBlock` style** (only keyed ones like
+     `BodyTextBlockStyle`), so plain `TextBlock`s fall back to WPF's default **black**. **Fix:**
+     set `Foreground="{DynamicResource TextFillColorPrimaryBrush}"` on **each `Page` root**
+     (`WelcomePage`, `DownloaderPage`, `HistoryPage`, `SettingsPage`) — page-local inheritance
+     themes all plain text (a blanket implicit `TextBlock` style was rejected: it would also
+     override button/combo template foregrounds, e.g. white-on-accent primary buttons).
+  2. **Blank "main interface" on launch** until the user clicked a pane item. **Root cause:**
+     `NavigationView` selects nothing by default and nothing navigated at startup; the
+     purpose-built `WelcomePage` was never wired. **Fix:** registered `WelcomePage` in DI and
+     navigate to it from `MainWindow` once `RootNavigation` is `Loaded`.
+- **Verified:** Release build **0/0**, **189/189** unit tests pass. **Not verified (headless
+  env):** the actual dark-mode text rendering and the WelcomePage landing — needs a user
+  visual check. SDD → v0.12.2 (§13 + Changelog).
+- **Next:** user confirms visually; delivered via branch `fix/dark-mode-text-and-default-page` → PR.
+
 ### 2026-07-08 — Docs: "personal project" scope note
 
 - **Done:** added a note that FFMedia, though public, is developed primarily for the author's

@@ -320,6 +320,7 @@ Two PRs, per the M5/M6 precedent:
 | SDD §8 Media Processing | Rewritten: `FFMedia.Media` realized as analyzer + runner + pure parsers. |
 | SDD §9 Binary Management | `ffprobe.exe` extracted from the same pinned, hash-verified BtbN zip; `ExternalBinary.Ffprobe` added. |
 | SDD §10 Data & Persistence | Add `encode-speed.json` (`SpeedProfile`). |
+| SDD §13 UI / UX | Add the **Video Merger screen** (clip list + locks, shuffle, target overrides, summary line, merge/cancel). |
 | SDD §16 Security & Legal | **The GPL ffmpeg build is now load-bearing** — the merger's normalize phase re-encodes with x264/x265, so the LGPL variant is no longer a drop-in alternative. `ffprobe.exe` carries the same GPL obligation. |
 | SDD §17 Milestones | M7 moves from *(future)* to a defined row. |
 | SDD §19 Open Questions | Record the deferrals: transitions, per-clip trim, per-clip fit mode, background music, merge queue. |
