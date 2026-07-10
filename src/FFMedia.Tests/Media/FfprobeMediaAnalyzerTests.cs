@@ -62,6 +62,8 @@ public class FfprobeMediaAnalyzerTests
         Assert.Equal(1280, result.Value!.Video!.Width);
         Assert.Contains("-print_format", runner.Arguments);
         Assert.Contains("json", runner.Arguments);
+        // Not "quiet": the non-zero-exit path reports ffprobe's stderr back to the user.
+        Assert.Contains("error", runner.Arguments);
         Assert.Contains("-show_streams", runner.Arguments);
         Assert.Contains("-show_format", runner.Arguments);
         Assert.Equal(@"C:\clips\a.mp4", runner.Arguments[^1]);
@@ -112,7 +114,8 @@ public class FfprobeMediaAnalyzerTests
         var result = await analyzer.AnalyzeAsync(@"C:\clips\a.mp4");
 
         Assert.False(result.IsSuccess);
-        Assert.NotNull(result.Error);
+        Assert.Contains("Could not run ffprobe", result.Error!);
+        Assert.Contains("cannot find the file specified", result.Error!);
     }
 
     [Fact]

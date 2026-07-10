@@ -28,9 +28,11 @@ public sealed class FfprobeMediaAnalyzer : IMediaAnalyzer
             return Result<MediaInfo>.Failure("ffprobe.exe is missing. Run build/fetch-binaries.ps1.");
         }
 
+        // -v error, not -v quiet: quiet suppresses the stderr text we report back on a
+        // non-zero exit, degrading "Invalid data found" to a bare "exit code 1".
         string[] arguments =
         [
-            "-v", "quiet",
+            "-v", "error",
             "-print_format", "json",
             "-show_format",
             "-show_streams",
