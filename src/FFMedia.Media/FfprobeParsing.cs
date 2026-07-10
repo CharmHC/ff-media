@@ -59,15 +59,15 @@ public static class FfprobeParsing
                 continue;
             }
 
-            if (!stream.TryGetProperty("width", out var w) || !stream.TryGetProperty("height", out var h)
+            if (!TryGetInt(stream, "width", out var width) || !TryGetInt(stream, "height", out var height)
                 || !FrameRate.TryParse(GetString(stream, "avg_frame_rate"), out var rate))
             {
                 continue;
             }
 
             return new VideoStreamInfo(
-                w.GetInt32(),
-                h.GetInt32(),
+                width,
+                height,
                 rate,
                 GetString(stream, "codec_name") ?? "",
                 GetString(stream, "pix_fmt") ?? "",
@@ -87,12 +87,12 @@ public static class FfprobeParsing
             }
 
             if (!TryGetInt(stream, "sample_rate", out var sampleRate)
-                || !stream.TryGetProperty("channels", out var channels))
+                || !TryGetInt(stream, "channels", out var channels))
             {
                 continue;
             }
 
-            return new AudioStreamInfo(GetString(stream, "codec_name") ?? "", sampleRate, channels.GetInt32());
+            return new AudioStreamInfo(GetString(stream, "codec_name") ?? "", sampleRate, channels);
         }
 
         return null;
@@ -138,11 +138,19 @@ public static class FfprobeParsing
         };
     }
 
+    // Every field read through this helper (width, height, sample_rate, channels) is
+    // integral by definition, so a fractional value means the stream is unusable.
     private static bool TryGetInt(JsonElement element, string name, out int result)
     {
         result = 0;
-        return TryGetDouble(element, name, out var value)
-            && value is >= int.MinValue and <= int.MaxValue
-            && int.TryParse(((int)value).ToString(CultureInfo.InvariantCulture), out result);
+        if (!TryGetDouble(element, name, out var value)
+            || value is < int.MinValue or > int.MaxValue
+            || Math.Truncate(value) != value)
+        {
+            return false;
+        }
+
+        result = (int)value;
+        return true;
     }
 }

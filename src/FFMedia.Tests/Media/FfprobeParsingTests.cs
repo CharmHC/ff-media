@@ -84,6 +84,89 @@ public class FfprobeParsingTests
         Assert.Null(FfprobeParsing.Parse(json));
     }
 
+    [Fact]
+    public void Parse_ReturnsNull_WhenDurationMissing()
+    {
+        const string json = """
+        {
+          "streams": [
+            { "codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080,
+              "avg_frame_rate": "30/1", "pix_fmt": "yuv420p" }
+          ],
+          "format": { "format_name": "mov" }
+        }
+        """;
+
+        Assert.Null(FfprobeParsing.Parse(json));
+    }
+
+    [Theory]
+    [InlineData("\"abc\"", "1080")]
+    [InlineData("1920", "12.5")]
+    public void Parse_ReturnsNull_ForAdversarialWidthOrHeight_WithoutThrowing(string width, string height)
+    {
+        var json = $$"""
+        {
+          "streams": [
+            { "codec_type": "video", "codec_name": "h264", "width": {{width}}, "height": {{height}},
+              "avg_frame_rate": "30/1", "pix_fmt": "yuv420p" }
+          ],
+          "format": { "format_name": "mov", "duration": "1.0" }
+        }
+        """;
+
+        var result = FfprobeParsing.Parse(json);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Parse_DropsAudioStream_WhenChannelsAdversarial()
+    {
+        // channels is malformed on the (only) audio stream; the video stream itself is fine,
+        // so Parse should still succeed overall with HasAudio == false.
+        const string json = """
+        {
+          "streams": [
+            { "codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080,
+              "avg_frame_rate": "30/1", "pix_fmt": "yuv420p" },
+            { "codec_type": "audio", "codec_name": "aac", "sample_rate": "48000", "channels": null }
+          ],
+          "format": { "format_name": "mov", "duration": "1.0" }
+        }
+        """;
+
+        var info = FfprobeParsing.Parse(json);
+
+        Assert.NotNull(info);
+        Assert.False(info!.HasAudio);
+        Assert.Null(info.Audio);
+    }
+
+    [Fact]
+    public void Parse_Succeeds_WhenWidthHeightChannelsAreStringTyped()
+    {
+        // Real ffprobe output: numeric stream fields are frequently emitted as JSON strings.
+        const string json = """
+        {
+          "streams": [
+            { "codec_type": "video", "codec_name": "h264", "width": "1920", "height": "1080",
+              "avg_frame_rate": "30/1", "pix_fmt": "yuv420p" },
+            { "codec_type": "audio", "codec_name": "aac", "sample_rate": "48000", "channels": "2" }
+          ],
+          "format": { "format_name": "mov", "duration": "1.0" }
+        }
+        """;
+
+        var info = FfprobeParsing.Parse(json);
+
+        Assert.NotNull(info);
+        Assert.Equal(1920, info!.Video!.Width);
+        Assert.Equal(1080, info.Video.Height);
+        Assert.True(info.HasAudio);
+        Assert.Equal(2, info.Audio!.Channels);
+    }
+
     [Theory]
     [InlineData("30000/1001", 30000, 1001)]
     [InlineData("25/1", 25, 1)]
