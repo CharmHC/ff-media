@@ -80,4 +80,36 @@ public class FfmpegProgressAccumulatorTests
         Assert.Null(accumulator.Add(line));
         Assert.Equal(TimeSpan.Zero, accumulator.Add("progress=continue")!.Position);
     }
+
+    [Theory]
+    [InlineData("-1")]                     // ffmpeg's early negative sentinel
+    [InlineData("-8775277097")]
+    [InlineData("99999999999999999999")]   // wider than long
+    public void Add_KeepsLastPosition_WhenOutTimeIsUnusable(string outTime)
+    {
+        var accumulator = new FfmpegProgressAccumulator();
+        accumulator.Add("out_time_us=2000000");
+        accumulator.Add($"out_time_us={outTime}");
+
+        Assert.Equal(TimeSpan.FromSeconds(2), accumulator.Add("progress=continue")!.Position);
+    }
+
+    [Fact]
+    public void Add_TreatsOutTimeMsAsMicroseconds()
+    {
+        // Despite the name, ffmpeg reports out_time_ms in microseconds.
+        var accumulator = new FfmpegProgressAccumulator();
+        accumulator.Add("out_time_ms=1500000");
+
+        Assert.Equal(TimeSpan.FromSeconds(1.5), accumulator.Add("progress=continue")!.Position);
+    }
+
+    [Fact]
+    public void Add_ParsesScientificNotationSpeed()
+    {
+        var accumulator = new FfmpegProgressAccumulator();
+        accumulator.Add("speed=1.0e+02x");
+
+        Assert.Equal(100.0, accumulator.Add("progress=continue")!.Speed);
+    }
 }
