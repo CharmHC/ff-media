@@ -97,6 +97,13 @@ public class MergeServiceTests : IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
             await File.WriteAllTextAsync(output, "segment", ct);
 
+            // A real ffmpeg emits a progress block every few hundred ms, so emit SEVERAL. With a
+            // single report, "one speed sample per clip" and "one per progress line" are
+            // observationally identical, and the regression that folds every line into the
+            // rolling average — saturating a ten-RUN window from one file, and narrowing the
+            // confidence band to its floor off a single measurement — would pass unnoticed.
+            progress?.Report(new FfmpegProgress(TimeSpan.FromSeconds(1), 4.0, IsFinal: false));
+            progress?.Report(new FfmpegProgress(TimeSpan.FromSeconds(3), 4.0, IsFinal: false));
             progress?.Report(new FfmpegProgress(TimeSpan.FromSeconds(5), 4.0, IsFinal: true));
             await Task.Delay(20, ct);
             Interlocked.Decrement(ref _current);
