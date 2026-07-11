@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Already in the solution at this version (the YouTube Downloader module uses it) — not a new
+         dependency, just this module finally needing the MVVM primitives for its ViewModels. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\FFMedia.Core\FFMedia.Core.csproj" />
     <ProjectReference Include="..\FFMedia.Media\FFMedia.Media.csproj" />
   </ItemGroup>
