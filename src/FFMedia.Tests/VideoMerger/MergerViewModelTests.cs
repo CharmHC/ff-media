@@ -87,12 +87,20 @@ public class MergerViewModelTests
     {
         public List<HistoryEntry> Entries { get; } = new();
 
+        /// <summary>Set to simulate a locked or unwritable history.json.</summary>
+        public Exception? AppendThrows { get; set; }
+
         public event EventHandler? Changed;
 
         public IReadOnlyList<HistoryEntry> Query() => Entries;
 
         public void Append(HistoryEntry entry)
         {
+            if (AppendThrows is not null)
+            {
+                throw AppendThrows;
+            }
+
             Entries.Add(entry);
             Changed?.Invoke(this, EventArgs.Empty);
         }
@@ -1149,6 +1157,52 @@ public class MergerViewModelTests
         Assert.Equal("the engine exploded", notification.Message); // verbatim — it is all we have
         Assert.False(h.Vm.IsMerging);
         Assert.True(h.Vm.MergeCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Merge_WhenCanceled_IsDecidedByTheToken_NotByMatchingTheEnginesErrorText()
+    {
+        // The engine here reports a cancel with a message that looks nothing like "Merge canceled."
+        // A branch that sniffed the error STRING would misfile this as a red "Merge failed" toast —
+        // and would do exactly that in production the day someone rewords the engine's message. What
+        // makes it a cancellation is that the user cancelled it, so that is what we test on.
+        var h = await BuildWithAsync("a.mp4", "b.mp4");
+        h.Merger.Behavior = (_, _, _) =>
+        {
+            h.Vm.CancelCommand.Execute(null);
+            return Task.FromResult(Result<string>.Failure("ffmpeg failed (exit 255): Exiting normally, received signal 2."));
+        };
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.Empty(h.History.Entries);
+        var notification = Assert.Single(h.Notifications.Sent);
+        Assert.Equal(NotificationSeverity.Info, notification.Severity);
+        Assert.Equal("Merge canceled.", notification.Message); // ours, not the engine's text
+        Assert.Equal("Merge canceled.", h.Vm.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Merge_WhenHistoryCannotBeWritten_StillReportsTheMergeAsSucceeded()
+    {
+        // The output file is on disk — the merge WORKED. A locked history.json must not roll into the
+        // failure path and show a red "Merge failed", sending the user hunting for a problem with a
+        // video that is fine. Losing a log row is a footnote; lying about the outcome is not.
+        var h = await BuildWithAsync("a.mp4", "b.mp4");
+        h.History.AppendThrows = new IOException("history.json is in use by another process.");
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.Equal("Merge complete.", h.Vm.StatusMessage);
+        Assert.Equal(100, h.Vm.OverallPercent);
+        Assert.False(h.Vm.IsMerging);
+
+        // Two toasts: the merge succeeded, and — separately — history could not be updated.
+        Assert.Equal(2, h.Notifications.Sent.Count);
+        Assert.Equal(NotificationSeverity.Warning, h.Notifications.Sent[0].Severity);
+        Assert.Equal("History not updated", h.Notifications.Sent[0].Title);
+        Assert.Equal(NotificationSeverity.Success, h.Notifications.Sent[1].Severity);
+        Assert.DoesNotContain(h.Notifications.Sent, n => n.Severity == NotificationSeverity.Error);
     }
 
     [Fact]

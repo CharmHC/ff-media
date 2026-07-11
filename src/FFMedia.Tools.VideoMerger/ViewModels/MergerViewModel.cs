@@ -290,14 +290,7 @@ public partial class MergerViewModel : ObservableObject
 
                 OverallPercent = 100;
                 StatusMessage = "Merge complete.";
-                _history.Append(new HistoryEntry(
-                    Title: OutputFileName,
-                    Url: "",                       // a merge has no URL — its inputs are local files
-                    OutputPath: saved,
-                    Format: DescribeTarget(),
-                    Timestamp: DateTimeOffset.Now,
-                    Status: "Completed",
-                    Source: HistorySource.Merge));
+                RecordInHistory(saved);
                 _notifications.Notify(new Notification(
                     "Merge complete", $"Saved to {saved}", NotificationSeverity.Success));
                 return;
@@ -333,6 +326,34 @@ public partial class MergerViewModel : ObservableObject
             IsMerging = false;
             _cancellation.Dispose();
             _cancellation = null;
+        }
+    }
+
+    /// <summary>Records the finished merge, tolerating a broken history sink.</summary>
+    /// <remarks>The merge is DONE — the output file is sitting on disk. If <c>history.json</c> happens
+    /// to be locked or unwritable, letting that exception escape would roll straight into the failure
+    /// path and show a red "Merge failed" for a merge that in fact succeeded, sending the user hunting
+    /// for a problem with their video. Losing a log row is a footnote; lying about the outcome is not.
+    /// <c>DownloadManager</c> guards its sinks for the same reason.</remarks>
+    private void RecordInHistory(string outputPath)
+    {
+        try
+        {
+            _history.Append(new HistoryEntry(
+                Title: OutputFileName,
+                Url: "",                       // a merge has no URL — its inputs are local files
+                OutputPath: outputPath,
+                Format: DescribeTarget(),
+                Timestamp: DateTimeOffset.Now,
+                Status: "Completed",
+                Source: HistorySource.Merge));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _notifications.Notify(new Notification(
+                "History not updated",
+                $"The merge finished, but it could not be recorded in History: {ex.Message}",
+                NotificationSeverity.Warning));
         }
     }
 
