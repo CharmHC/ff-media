@@ -25,6 +25,23 @@ public class ConformanceCheckTests
         Assert.Empty(result.Mismatches);
     }
 
+    [Theory]
+    [InlineData(1)] // e.g. an embedded subtitle track — what our own downloader writes with --embed-subs
+    [InlineData(3)] // subtitles + a second audio language + a data stream
+    public void Evaluate_FlagsExtraStreams_EvenWhenVideoAndAudioBothMatch(int extras)
+    {
+        // The dangerous direction. This clip matches the target in every property we MODEL, so
+        // before ExtraStreamCount existed it was judged conforming and stream-copied — and ffmpeg,
+        // which matches segments by stream INDEX, put the next clip's audio on this clip's subtitle
+        // slot, exited 0, and produced an output whose later clips were silently mute.
+        var clip = Conforming() with { ExtraStreamCount = extras };
+
+        var result = ConformanceCheck.Evaluate(clip, Target);
+
+        Assert.False(result.IsConforming);
+        Assert.Equal([$"{extras} extra stream(s) (e.g. subtitles) must be dropped"], result.Mismatches);
+    }
+
     [Fact]
     public void Evaluate_FlagsResolution()
     {

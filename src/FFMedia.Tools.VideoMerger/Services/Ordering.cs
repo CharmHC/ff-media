@@ -38,7 +38,7 @@ public static class Ordering
             if (index < 0 || index >= items.Count)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(items), index, $"Locked index must be within [0, {items.Count - 1}].");
+                    nameof(lockedIndexSelector), index, $"Locked index must be within [0, {items.Count - 1}].");
             }
 
             if (taken[index])

@@ -171,6 +171,34 @@ public class MergeServiceTests : IDisposable
     // ---------------------------------------------------------------- fast path
 
     [Fact]
+    public async Task MergeAsync_NormalizesAClipCarryingASubtitleTrack_RatherThanFastPathingIt()
+    {
+        // The clip matches the target in every property the model carries, and differs only in
+        // holding an extra stream. Stream-copying it into the concat is silent corruption: ffmpeg
+        // matches segments by stream INDEX, lands the plain clip's audio on this clip's subtitle
+        // slot, exits 0, and the merge "succeeds" with a mute second half. So it must be encoded.
+        var withSubtitles = new MergeClip(
+            "subbed.mp4", Info(Yuv1080p30, Aac) with { ExtraStreamCount = 1 });
+        var ffmpeg = new FakeFfmpeg();
+        var request = Request(withSubtitles, Conforming("plain.mp4"));
+
+        var result = await Build(ffmpeg).MergeAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error);
+
+        // Two invocations: one encode for the subbed clip, then the concat. Not a fast path.
+        Assert.Equal(2, ffmpeg.Invocations.Count);
+        var encode = ffmpeg.Invocations.First();
+        Assert.Contains("-vf", encode);
+        Assert.Contains("subbed.mp4", encode);
+
+        // And the concat references the NORMALIZED intermediate for it, never the original.
+        Assert.DoesNotContain("subbed.mp4", ffmpeg.ConcatListContent);
+        Assert.Contains("plain.mp4", ffmpeg.ConcatListContent);
+        File.Delete(request.OutputPath);
+    }
+
+    [Fact]
     public async Task MergeAsync_FastPath_SkipsNormalizationEntirely()
     {
         var ffmpeg = new FakeFfmpeg();

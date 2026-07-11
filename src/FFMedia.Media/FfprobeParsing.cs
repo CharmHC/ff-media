@@ -46,7 +46,19 @@ public static class FfprobeParsing
             }
 
             var container = GetString(format, "format_name") ?? "";
-            return new MediaInfo(TimeSpan.FromSeconds(seconds), container, video, ParseAudio(streams));
+            var audio = ParseAudio(streams);
+
+            // Everything past the first video and the first audio: subtitles, extra audio tracks,
+            // data streams. Video/Audio above describe only the first of each, so this is the only
+            // record that the rest of the file exists — and concat's identical-layout requirement
+            // is about all of them.
+            var accounted = 1 + (audio is null ? 0 : 1);
+            var extras = Math.Max(0, streams.GetArrayLength() - accounted);
+
+            return new MediaInfo(TimeSpan.FromSeconds(seconds), container, video, audio)
+            {
+                ExtraStreamCount = extras,
+            };
         }
     }
 

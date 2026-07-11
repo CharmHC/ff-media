@@ -26,6 +26,42 @@ public class FfprobeParsingTests
     }
     """;
 
+    /// <summary>What our own YouTube Downloader writes with "embed subtitles" on: the subtitle
+    /// stream sits BETWEEN the video and the audio, which is exactly how ffmpeg's index-matching
+    /// concat ends up putting a later clip's audio onto this clip's subtitle slot.</summary>
+    private const string VideoWithSubtitlesJson = """
+    {
+      "streams": [
+        { "codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080,
+          "avg_frame_rate": "30/1", "pix_fmt": "yuv420p" },
+        { "codec_type": "subtitle", "codec_name": "mov_text" },
+        { "codec_type": "audio", "codec_name": "aac", "sample_rate": "48000", "channels": 2 }
+      ],
+      "format": { "format_name": "mov,mp4,m4a", "duration": "5.000000" }
+    }
+    """;
+
+    [Fact]
+    public void Parse_CountsStreamsBeyondTheFirstVideoAndAudio()
+    {
+        var info = FfprobeParsing.Parse(VideoWithSubtitlesJson);
+
+        Assert.NotNull(info);
+        // Video and Audio still describe the first of each — the subtitle is invisible to them,
+        // and ExtraStreamCount is the only record that it exists.
+        Assert.Equal("h264", info!.Video!.CodecName);
+        Assert.Equal("aac", info.Audio!.CodecName);
+        Assert.Equal(1, info.ExtraStreamCount);
+    }
+
+    [Theory]
+    [InlineData(VideoWithAudioJson)] // video + audio
+    [InlineData(SilentVideoJson)]    // video only
+    public void Parse_ReportsNoExtraStreams_ForAPlainClip(string json)
+    {
+        Assert.Equal(0, FfprobeParsing.Parse(json)!.ExtraStreamCount);
+    }
+
     [Fact]
     public void Parse_ReadsVideoAndAudio()
     {

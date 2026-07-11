@@ -49,13 +49,22 @@ _Newest first. One entry per completed task/session._
   the fast-path promise and the disk reservation would describe a different plan than the one that
   runs. A false *conforming* is the dangerous direction — it stream-copies a mismatched clip into
   `concat` and corrupts the output.
+- **Caught by the final whole-branch review (each task was individually correct):** `MediaInfo`
+  modelled only the **first** video + **first** audio stream, so a clip with an embedded subtitle
+  track looked *fully conforming*, took the fast path, and got stream-copied. ffmpeg's concat matches
+  segments by stream **index** — the next clip's audio lands on this clip's subtitle slot, ffmpeg
+  **exits 0**, and the user gets a merge whose later clips are **silently mute** (reproduced against
+  real ffmpeg 8.1). Not hypothetical: **our own downloader writes such files** when "embed subtitles"
+  is on. `MediaInfo` now carries `ExtraStreamCount` and `ConformanceCheck` treats extras as a
+  mismatch, so those clips are re-encoded (normalization maps only `0:v:0` + one audio, dropping
+  them). `Conformance.IsConforming` is now *derived* from `Mismatches`, so the two cannot drift.
 - **The bug worth remembering:** cancelling a token does **not** synchronously dequeue a pending
   `SemaphoreSlim.WaitAsync` waiter — the cancellation's node-removal continuation is queued to the
   thread pool, so a `Release()` microseconds later still hands the permit to the cancelled waiter,
   which then launches a **full ffmpeg encode** for a merge the user already cancelled. It showed up
   as a 1-in-5 flake; a 200-iteration harness proved 197/200 runs launched the extra encode. Fixed by
   re-checking the token *after* acquiring the gate.
-- **Verified:** Release build **0/0**; **414/414** unit tests pass (`Category!=Integration`). Each
+- **Verified:** Release build **0/0**; **420/420** unit tests pass (`Category!=Integration`). Each
   task was reviewed by an independent agent that mutation-tested the tests — which caught three
   suites that passed against a deliberately broken implementation (a reversed stderr tail, a biased
   Fisher–Yates, a per-progress-line speed sample). Argv was additionally validated end-to-end against

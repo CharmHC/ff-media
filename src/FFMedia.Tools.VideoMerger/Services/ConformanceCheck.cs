@@ -75,7 +75,19 @@ public static class ConformanceCheck
             }
         }
 
-        return new Conformance(mismatches.Count == 0, mismatches);
+        // Concat requires an identical stream LAYOUT, not merely matching video and audio (spec D4).
+        // A clip carrying anything extra — an embedded subtitle track, a second audio language, a
+        // data stream — cannot be stream-copied alongside a two-stream clip: ffmpeg matches segments
+        // by stream INDEX, so the other clips' audio lands on this clip's subtitle slot, ffmpeg exits
+        // 0, and the user gets an output whose later clips are silently mute. Re-encode it instead;
+        // normalization maps only 0:v:0 plus one audio stream, which drops the extras.
+        if (clip.ExtraStreamCount > 0)
+        {
+            mismatches.Add(
+                $"{clip.ExtraStreamCount} extra stream(s) (e.g. subtitles) must be dropped");
+        }
+
+        return new Conformance(mismatches);
     }
 
     /// <summary>Compares frame rates as rationals (cross-multiplication), not as raw
