@@ -627,6 +627,93 @@ public class MergeServiceTests : IDisposable
         File.Delete(request.OutputPath);
     }
 
+    // ---------------------------------------------------------------- per-clip progress
+
+    [Fact]
+    public async Task MergeAsync_ReportsPerClipProgress_IndexedByRequestOrder()
+    {
+        // Clip 0 conforms (nothing to encode -> already 100), clip 1 must be re-encoded.
+        var seen = new List<MergeProgress>();
+        var request = Request(Conforming("a.mp4"), NonConforming("b.webm"));
+
+        var result = await Build(new FakeFfmpeg()).MergeAsync(request, new SyncProgress<MergeProgress>(seen.Add));
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.All(seen, p => Assert.Equal(2, p.ClipPercents.Count));
+
+        // The conforming clip has no work to do, so it is never reported as pending: 100 from the
+        // very first snapshot. Showing it as a 0 % bar the user can never watch move would be a lie.
+        Assert.All(seen, p => Assert.Equal(100, p.ClipPercents[0]));
+
+        // The fake drives the 5 s clip through 1 s / 3 s / 5 s, so the encoded clip's own bar is
+        // exactly 0 (phase start) -> 20 -> 60 -> 100, then holds at 100 across CompleteEncode, the
+        // concat's four reports and the terminal one. Pinned in full: a monotonicity-only assertion
+        // would pass just as happily on a bar that never leaves 0 until the very last report.
+        var encoded = seen.Select(p => Math.Round(p.ClipPercents[1], 9)).ToArray();
+        Assert.Equal(new double[] { 0, 20, 60, 100, 100, 100, 100, 100, 100, 100 }, encoded);
+        File.Delete(request.OutputPath);
+    }
+
+    /// <summary><c>_fractions</c> is indexed by normalize SLOT; the published array is indexed by the
+    /// clip's position in <see cref="MergeRequest.Clips"/>. Here the two differ: the clips needing
+    /// work sit at indices 1 and 3, but they are slots 0 and 1 — so a tracker that published by slot
+    /// would light up clips 0 and 1 and attribute one clip's progress to another.</summary>
+    [Fact]
+    public async Task MergeAsync_ClipPercents_AreIndexedByRequestOrder_NotByEncodeSlot()
+    {
+        var seen = new List<MergeProgress>();
+        var request = Request(
+            Conforming("a.mp4"), NonConforming("b.webm"), Conforming("c.mp4"), NonConforming("d.webm"));
+
+        var result = await Build(new FakeFfmpeg(), maxConcurrency: 1)
+            .MergeAsync(request, new SyncProgress<MergeProgress>(seen.Add));
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.All(seen, p => Assert.Equal(4, p.ClipPercents.Count));
+
+        // The clips ever reported as incomplete are exactly the ones that actually had work to do.
+        var pending = Enumerable.Range(0, 4).Where(i => seen.Any(p => p.ClipPercents[i] < 100)).ToArray();
+        Assert.Equal(new[] { 1, 3 }, pending);
+
+        // Both encoded clips finish full, and neither conforming clip ever moved.
+        Assert.Equal(new double[] { 100, 100, 100, 100 }, seen[^1].ClipPercents);
+        File.Delete(request.OutputPath);
+    }
+
+    [Fact]
+    public async Task MergeAsync_FastPath_ReportsEveryClipAtOneHundred()
+    {
+        var seen = new List<MergeProgress>();
+        var request = Request(Conforming("a.mp4"), Conforming("b.mp4"));
+
+        var result = await Build(new FakeFfmpeg()).MergeAsync(request, new SyncProgress<MergeProgress>(seen.Add));
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.NotEmpty(seen);
+        Assert.All(seen, p => Assert.Equal(new double[] { 100, 100 }, p.ClipPercents));
+        File.Delete(request.OutputPath);
+    }
+
+    /// <summary>A canceled merge keeps each clip's bar exactly where it stopped — the half-encoded
+    /// clip must not snap to 0 or jump to 100.</summary>
+    [Fact]
+    public async Task MergeAsync_Canceled_KeepsPerClipBarsWhereTheyStopped()
+    {
+        using var cts = new CancellationTokenSource();
+        var seen = new List<MergeProgress>();
+        var task = Build(new HangingFfmpeg()).MergeAsync(
+            Request(Conforming("a.mp4"), NonConforming("b.webm")),
+            new SyncProgress<MergeProgress>(seen.Add),
+            cts.Token);
+        await cts.CancelAsync();
+
+        var result = await task;
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(MergeJobStatus.Canceled, seen[^1].Status);
+        Assert.Equal(new double[] { 100, 0 }, seen[^1].ClipPercents);
+    }
+
     // ---------------------------------------------------------------- speed profile
 
     [Fact]

@@ -76,6 +76,11 @@ public sealed class MergeService : IMergeService
         var tracker = new ProgressTracker(
             progress,
             [.. plan.Work.Select(w => w.Clip.Info.Duration.TotalSeconds)],
+            // Work[slot].Index IS the clip's position in request.Clips, which is exactly the mapping
+            // the per-clip bars need: _fractions is indexed by normalize SLOT, the published array by
+            // CLIP. Publishing by slot would attribute one clip's progress to another.
+            [.. plan.Work.Select(w => w.Index)],
+            request.Clips.Count,
             plan.Work.Count == 0 ? 0 : EncodeWeight);
 
         try
@@ -435,14 +440,27 @@ public sealed class MergeService : IMergeService
         private readonly IProgress<MergeProgress>? _sink;
         private readonly double[] _fractions;
         private readonly double[] _weights;
+
+        /// <summary>Normalize slot → the clip's index in <c>MergeRequest.Clips</c>. Only the clips
+        /// that need re-encoding have a slot at all.</summary>
+        private readonly int[] _slotToClipIndex;
+
+        private readonly int _clipCount;
         private readonly double _encodeWeight;
         private readonly Lock _gate = new();
         private double _highWater;
 
-        public ProgressTracker(IProgress<MergeProgress>? sink, double[] clipSeconds, double encodeWeight)
+        public ProgressTracker(
+            IProgress<MergeProgress>? sink,
+            double[] clipSeconds,
+            int[] slotToClipIndex,
+            int clipCount,
+            double encodeWeight)
         {
             _sink = sink;
             _encodeWeight = encodeWeight;
+            _slotToClipIndex = slotToClipIndex;
+            _clipCount = clipCount;
             _fractions = new double[clipSeconds.Length];
             _weights = new double[clipSeconds.Length];
 
@@ -516,6 +534,22 @@ public sealed class MergeService : IMergeService
             return _encodeWeight * Clamp01(done);
         }
 
+        /// <summary>Per-clip percentages in request order. A clip with no normalize slot already
+        /// conforms, so it is 100 — it is not waiting on work, it simply has none. Called only from
+        /// <see cref="Emit"/>, i.e. always under <see cref="_gate"/>: snapshotting outside the lock
+        /// would tear across a concurrent <see cref="Advance"/> from another clip's encode.</summary>
+        private double[] ClipPercents()
+        {
+            var percents = new double[_clipCount];
+            Array.Fill(percents, 100.0);
+            for (var slot = 0; slot < _slotToClipIndex.Length; slot++)
+            {
+                percents[_slotToClipIndex[slot]] = Math.Clamp(_fractions[slot] * 100.0, 0, 100);
+            }
+
+            return percents;
+        }
+
         private void Emit(MergeJobStatus status, double percent, string? clip)
         {
             var value = Math.Clamp(percent, 0, 100);
@@ -528,7 +562,7 @@ public sealed class MergeService : IMergeService
                 _highWater = value;
             }
 
-            _sink?.Report(new MergeProgress(status, value, clip));
+            _sink?.Report(new MergeProgress(status, value, clip, ClipPercents()));
         }
 
         private static double Clamp01(double value)
