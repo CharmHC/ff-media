@@ -1,3 +1,4 @@
+using System.Globalization;
 using FFMedia.Core.History;
 using FFMedia.Core.Notifications;
 using FFMedia.Core.Results;
@@ -537,5 +538,406 @@ public class MergerViewModelTests
         }
 
         Assert.True(orders.Count > 1, "An unlocked row stayed pinned to index 0.");
+    }
+
+    // ---- the target: derived, then overridable ------------------------------
+
+    [Fact]
+    public async Task Target_IsDerivedFromTheClips()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1280, 720));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1920, 1080)); // largest area wins
+
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        Assert.Equal(1920, h.Vm.Target.Width);
+        Assert.Equal(1080, h.Vm.Target.Height);
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public void Target_WithNoClips_IsTheDefault_AndIsNotAnOverride()
+    {
+        var h = Build();
+
+        Assert.Same(MergeTarget.Default, h.Vm.Target);
+        Assert.False(h.Vm.IsTargetOverridden);
+        Assert.Equal("Add at least two clips to merge.", h.Vm.Summary);
+    }
+
+    [Fact]
+    public async Task Target_IsReDerived_WhenAClipIsRemoved()
+    {
+        // Not merely "survives a removal": drop the 4K clip and the proposal must come back DOWN.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\hd.mp4", Info(1920, 1080));
+        h.Analyzer.Returns(@"C:\uhd.mp4", Info(3840, 2160));
+        await h.Vm.AddClipsAsync([@"C:\hd.mp4", @"C:\uhd.mp4"]);
+        Assert.Equal(3840, h.Vm.Target.Width);
+
+        h.Vm.RemoveClip(h.Vm.Clips[1]);
+
+        Assert.Equal(1920, h.Vm.Target.Width);
+        Assert.Equal(1080, h.Vm.Target.Height);
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task Target_OnceOverridden_SurvivesAddingAnotherClip()
+    {
+        // The user deliberately chose 4K. Adding a 720p clip must not silently undo that.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
+
+        h.Vm.Target = h.Vm.Target with { Width = 3840, Height = 2160 };
+        Assert.True(h.Vm.IsTargetOverridden);
+
+        await h.Vm.AddClipsAsync([@"C:\b.mp4"]);
+
+        Assert.Equal(3840, h.Vm.Target.Width);
+        Assert.Equal(2160, h.Vm.Target.Height);
+        Assert.True(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task Target_OnceOverridden_SurvivesRemovingAClipToo()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        h.Vm.Target = h.Vm.Target with { Width = 3840, Height = 2160 };
+        h.Vm.RemoveClip(h.Vm.Clips[1]);
+
+        Assert.Equal(3840, h.Vm.Target.Width);
+        Assert.True(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task ResetTargetToDerived_RestoresTheProposal()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
+        h.Vm.Target = h.Vm.Target with { Width = 640, Height = 480 };
+
+        h.Vm.ResetTargetToDerived();
+
+        Assert.Equal(1920, h.Vm.Target.Width);
+        Assert.Equal(1080, h.Vm.Target.Height);
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task ResetTargetToDerived_ThenAddingAClip_ReDerivesAgain()
+    {
+        // Reset must genuinely re-arm the derivation, not just restore one value.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1280, 720));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(3840, 2160));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
+        h.Vm.Target = h.Vm.Target with { Width = 640, Height = 480 };
+        h.Vm.ResetTargetToDerived();
+
+        await h.Vm.AddClipsAsync([@"C:\b.mp4"]);
+
+        Assert.Equal(3840, h.Vm.Target.Width);
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task EditingTheTarget_RefreshesEveryClipBadge()
+    {
+        // The clip conforms to the derived 1080p target, and stops conforming when the user
+        // switches to 4K. Nothing is re-probed — the badge just recomputes.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
+        Assert.True(h.Vm.Clips[0].IsConforming);
+        Assert.Equal("Conforms", h.Vm.Clips[0].Badge);
+
+        h.Vm.Target = h.Vm.Target with { Width = 3840, Height = 2160 };
+
+        Assert.False(h.Vm.Clips[0].IsConforming);
+        Assert.Equal("Re-encode", h.Vm.Clips[0].Badge);
+        Assert.Equal("resolution 1920x1080 != 3840x2160", h.Vm.Clips[0].BadgeTooltip);
+        Assert.Single(h.Analyzer.Probed); // and the file was probed exactly once, at add-time
+    }
+
+    [Fact]
+    public async Task AddingAClip_AppliesTheTargetToTheBadgesImmediately()
+    {
+        // Before Task 6 the badge was blank until something else nudged it. A row with no verdict
+        // is the one thing the list must never show: the user cannot tell "conforms" from "unknown".
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720, "vp9"));
+
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        Assert.Equal(new[] { "Conforms", "Re-encode" }, h.Vm.Clips.Select(c => c.Badge).ToArray());
+        Assert.Equal(new[] { false, true }, h.Vm.Clips.Select(c => c.ShowProgressBar).ToArray());
+    }
+
+    [Fact]
+    public async Task Target_RaisesPropertyChangedForItselfAndSelectedFitMode()
+    {
+        var h = await BuildWithClipsAsync(2);
+        var raised = new List<string>();
+        h.Vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+
+        h.Vm.Target = h.Vm.Target with { Width = 3840, Height = 2160 };
+
+        Assert.Contains("Target", raised);
+        Assert.Contains("SelectedFitMode", raised);
+        Assert.Contains("IsTargetOverridden", raised);
+        Assert.Contains("Summary", raised);
+    }
+
+    [Fact]
+    public async Task ResetTargetToDerived_AlsoRaisesPropertyChangedForTarget()
+    {
+        // SetProperty on the backing field is how the re-derivation dodges the "user overrode it"
+        // hook — but it must still tell the view the value moved, or the panel shows a stale target.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
+        h.Vm.Target = h.Vm.Target with { Width = 640, Height = 480 };
+
+        var raised = new List<string>();
+        h.Vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+
+        h.Vm.ResetTargetToDerived();
+
+        Assert.Contains("Target", raised);
+        Assert.Contains("SelectedFitMode", raised);
+        Assert.Contains("IsTargetOverridden", raised);
+    }
+
+    // ---- fit mode ----------------------------------------------------------
+
+    [Fact]
+    public void FitModes_OffersEveryMode_InDeclarationOrder()
+    {
+        var h = Build();
+
+        Assert.Equal(new[] { FitMode.Fit, FitMode.Fill, FitMode.Stretch }, h.Vm.FitModes.ToArray());
+        Assert.Equal(FitMode.Fit, h.Vm.SelectedFitMode);
+    }
+
+    [Fact]
+    public async Task SelectedFitMode_WritesThroughToTheTarget_AndCountsAsAnOverride()
+    {
+        var h = await BuildWithClipsAsync(2);
+        Assert.False(h.Vm.IsTargetOverridden);
+
+        h.Vm.SelectedFitMode = FitMode.Fill;
+
+        Assert.Equal(FitMode.Fill, h.Vm.Target.FitMode);
+        Assert.Equal(FitMode.Fill, h.Vm.SelectedFitMode);
+        Assert.True(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task SelectedFitMode_SetToItsCurrentValue_IsNotAnOverride()
+    {
+        // A ComboBox echoes its own value back on load. That must not be mistaken for a user edit,
+        // or merely opening the page would freeze the target at whatever the first clip implied.
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.SelectedFitMode = FitMode.Fit; // already Fit
+
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    // ---- output path -------------------------------------------------------
+
+    [Fact]
+    public void OutputPath_CombinesTheFolderAndTheFileName()
+    {
+        var h = Build();
+
+        Assert.Equal("merged.mp4", h.Vm.OutputFileName);
+        Assert.Equal(@"C:\out\merged.mp4", h.Vm.OutputPath);
+    }
+
+    [Fact]
+    public void OutputPath_TracksBothTheFolderAndTheFileName()
+    {
+        var h = Build();
+        var raised = new List<string>();
+        h.Vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+
+        h.Vm.OutputFileName = "holiday.mp4";
+        Assert.Equal(@"C:\out\holiday.mp4", h.Vm.OutputPath);
+
+        h.Vm.OutputFolder = @"D:\videos";
+        Assert.Equal(@"D:\videos\holiday.mp4", h.Vm.OutputPath);
+
+        Assert.Equal(2, raised.Count(name => name == "OutputPath"));
+    }
+
+    // ---- the summary line (spec §6.5) --------------------------------------
+
+    [Fact]
+    public async Task Summary_CountsClipsDurationAndReencodes()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080, seconds: 120));  // conforms
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720, "vp9", 132));     // needs re-encoding
+
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        // The ETA is fully determined: an unmeasured SpeedProfile yields the seeded HD1080 factor
+        // (3.5x) and the widest ±35% band, so this whole line is pinned, en-dash and all.
+        Assert.Equal(
+            "2 clips · 4:12 output · 1 needs re-encoding · est. 0:25–0:51",
+            h.Vm.Summary);
+    }
+
+    [Fact]
+    public async Task Summary_PluralizesTwoOrMoreReencodes()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080, seconds: 60));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720, "vp9", 60));
+        h.Analyzer.Returns(@"C:\c.mp4", Info(1280, 720, "vp9", 60));
+
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4", @"C:\c.mp4"]);
+
+        Assert.StartsWith("3 clips · 3:00 output · 2 need re-encoding · est. ", h.Vm.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Summary_SaysSoOnTheFastPath()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080, seconds: 120));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1920, 1080, seconds: 132));
+
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        Assert.Equal("2 clips · 4:12 output · all clips conform · est. under 5s", h.Vm.Summary);
+    }
+
+    [Fact]
+    public async Task Summary_ShowsHoursOnceTheOutputPassesAnHour()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080, seconds: 3600));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1920, 1080, seconds: 305));
+
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        Assert.Equal("2 clips · 1:05:05 output · all clips conform · est. under 5s", h.Vm.Summary);
+    }
+
+    [Fact]
+    public async Task Summary_IsInvariant_OnACommaDecimalMachine()
+    {
+        // Durations and counts are technical figures, not localized prose. A German machine must
+        // read back exactly the same line — no thousands separators, no comma decimals.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080, seconds: 120));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720, "vp9", 132));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            // No await inside the scope: the culture must not leak onto a pooled thread.
+            CultureInfo.CurrentCulture = new CultureInfo("de-DE");
+            h.Vm.ResetTargetToDerived(); // rebuilds the summary under the German culture
+            Assert.Equal(
+                "2 clips · 4:12 output · 1 needs re-encoding · est. 0:25–0:51",
+                h.Vm.Summary);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
+    }
+
+    [Fact]
+    public async Task Summary_RevertsToThePromptWhenTheListDropsBelowTwo()
+    {
+        var h = await BuildWithClipsAsync(2);
+        Assert.NotEqual("Add at least two clips to merge.", h.Vm.Summary);
+
+        h.Vm.RemoveClip(h.Vm.Clips[0]);
+
+        Assert.Equal("Add at least two clips to merge.", h.Vm.Summary);
+    }
+
+    [Fact]
+    public async Task Summary_RecomputesWhenTheTargetIsEdited()
+    {
+        // The fast path is only "fast" against the target in force. Raising it to 4K makes both
+        // clips non-conforming, and the line must say so — with no re-probe.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080, seconds: 120));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1920, 1080, seconds: 132));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+        Assert.Equal("2 clips · 4:12 output · all clips conform · est. under 5s", h.Vm.Summary);
+
+        h.Vm.Target = h.Vm.Target with { Width = 3840, Height = 2160 };
+
+        Assert.StartsWith("2 clips · 4:12 output · 2 need re-encoding · est. ", h.Vm.Summary, StringComparison.Ordinal);
+        Assert.Equal(2, h.Analyzer.Probed.Count);
+    }
+
+    // ---- CanMerge ----------------------------------------------------------
+
+    [Fact]
+    public async Task CanMerge_RequiresAtLeastTwoClips()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+
+        Assert.False(h.Vm.CanMerge);
+
+        await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
+        Assert.False(h.Vm.CanMerge); // merging one clip is a copy, not a merge
+
+        await h.Vm.AddClipsAsync([@"C:\b.mp4"]);
+        Assert.True(h.Vm.CanMerge);
+
+        h.Vm.RemoveClip(h.Vm.Clips[0]);
+        Assert.False(h.Vm.CanMerge);
+    }
+
+    [Fact]
+    public async Task CanMerge_IsFalseWhileAMergeIsRunning()
+    {
+        var h = await BuildWithClipsAsync(2);
+        var raised = new List<string>();
+        h.Vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+        Assert.True(h.Vm.CanMerge);
+
+        h.Vm.IsMerging = true;
+
+        Assert.False(h.Vm.CanMerge);
+        Assert.Contains("CanMerge", raised);
+
+        h.Vm.IsMerging = false;
+        Assert.True(h.Vm.CanMerge);
+    }
+
+    [Fact]
+    public async Task CanMerge_NotifiesWhenTheClipCountCrossesTheThreshold()
+    {
+        var h = await BuildWithClipsAsync(1);
+        var raised = new List<string>();
+        h.Vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+        h.Analyzer.Returns(@"C:\second.mp4", Info());
+
+        await h.Vm.AddClipsAsync([@"C:\second.mp4"]);
+
+        Assert.Contains("CanMerge", raised);
     }
 }

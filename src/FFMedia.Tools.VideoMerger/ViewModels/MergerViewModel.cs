@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -20,6 +21,10 @@ public partial class MergerViewModel : ObservableObject
     private readonly ISpeedProfileStore _speeds;
     private readonly IHistoryService _history;
     private readonly INotificationService _notifications;
+
+    /// <summary>True only while <see cref="SetTarget"/> is re-deriving, so <see cref="OnTargetChanged"/>
+    /// can tell a proposal apart from a user edit.</summary>
+    private bool _isRederiving;
 
     public MergerViewModel(
         IMediaAnalyzer analyzer,
@@ -52,7 +57,56 @@ public partial class MergerViewModel : ObservableObject
     /// clock on every Shuffle click.</summary>
     public int ShuffleSeed { get; set; } = Environment.TickCount;
 
-    [ObservableProperty] private string _outputFolder;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(OutputPath))]
+    private string _outputFolder;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(OutputPath))]
+    private string _outputFileName = "merged.mp4";
+
+    /// <summary>True while a merge is running. The commands that flip it arrive in Task 7; it lives
+    /// here because <see cref="CanMerge"/> — which this task owns — is defined in terms of it.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanMerge))]
+    private bool _isMerging;
+
+    /// <summary>The standardization target every clip is conformed to. Derived from the clips, then
+    /// freely overridable — see <see cref="IsTargetOverridden"/>.</summary>
+    [ObservableProperty] private MergeTarget _target = MergeTarget.Default;
+
+    /// <summary>Set the moment the user edits <see cref="Target"/> through its public setter. From
+    /// then on the target is theirs: the clip list no longer re-derives it.</summary>
+    [ObservableProperty] private bool _isTargetOverridden;
+
+    /// <summary>The spec §6.5 line under the clip list.</summary>
+    [ObservableProperty] private string _summary = NoClipsSummary;
+
+    private const string NoClipsSummary = "Add at least two clips to merge.";
+
+    public IReadOnlyList<FitMode> FitModes { get; } = Enum.GetValues<FitMode>();
+
+    /// <summary>The fit mode lives on the target, but the page binds a plain dropdown, so surface it
+    /// as a settable scalar. Writing the value already in force is NOT an edit — a ComboBox echoes
+    /// its own selection back when the page loads, and treating that as an override would freeze the
+    /// target at whatever the first clip happened to imply.</summary>
+    public FitMode SelectedFitMode
+    {
+        get => Target.FitMode;
+        set
+        {
+            if (Target.FitMode != value)
+            {
+                Target = Target with { FitMode = value };
+            }
+        }
+    }
+
+    public string OutputPath => Path.Combine(OutputFolder, OutputFileName);
+
+    /// <summary>Merging a single clip is a copy, not a merge — and a second merge while one is
+    /// already running would fight it for the temp directory.</summary>
+    public bool CanMerge => Clips.Count >= 2 && !IsMerging;
 
     /// <summary>Probes each path and appends it. A file the analyzer cannot read — or one with no
     /// video track (an audio file) — is rejected here, at add time (spec §8): letting it into the
@@ -172,8 +226,114 @@ public partial class MergerViewModel : ObservableObject
         }
     }
 
-    /// <summary>Re-derives the target, conformance and estimate. Filled in by Task 6.</summary>
+    /// <summary>Throws the user's edits away and goes back to the proposal the clips imply. The only
+    /// way out of <see cref="IsTargetOverridden"/>.</summary>
+    [RelayCommand]
+    public void ResetTargetToDerived() => SetTarget(Derive(), overridden: false);
+
+    /// <summary>The user edited the target through its public setter, so stop re-deriving it. Adding
+    /// a 720p clip must not silently undo a 4K target they deliberately chose.</summary>
+    /// <remarks>A re-derivation writes the same property, so it would trip this hook too — hence the
+    /// explicit <see cref="_isRederiving"/> guard. Writing the backing field through
+    /// <c>SetProperty(ref _target, …)</c> would also dodge the hook (CommunityToolkit generates the
+    /// callback inside the property setter, not inside <c>SetProperty</c>), but the toolkit's own
+    /// analyzer rejects touching an <c>[ObservableProperty]</c> field directly (MVVMTK0034) — and a
+    /// warning is a build failure here.</remarks>
+    partial void OnTargetChanged(MergeTarget value)
+    {
+        if (_isRederiving)
+        {
+            return; // SetTarget settles the flag and then notifies + refreshes exactly once
+        }
+
+        IsTargetOverridden = true;
+        OnPropertyChanged(nameof(SelectedFitMode));
+        RefreshBadgesAndSummary();
+    }
+
+    /// <summary>The clip list changed. Re-derive the target (unless the user has claimed it), then
+    /// re-run every badge and the summary against whichever target is now in force.</summary>
     private void Recompute()
     {
+        if (IsTargetOverridden)
+        {
+            RefreshBadgesAndSummary();
+        }
+        else
+        {
+            SetTarget(Derive(), overridden: false);
+        }
+
+        OnPropertyChanged(nameof(CanMerge));
+
+        // MergeCommand arrives in Task 7, along with the notification of its CanExecute. It cannot be
+        // named here at all — `?.` would not help, the symbol does not exist yet.
     }
+
+    private MergeTarget Derive()
+        => Clips.Count == 0
+            ? MergeTarget.Default // Derive() throws on an empty list, and there is nothing to propose
+            : MergeTargetDerivation.Derive([.. Clips.Select(c => c.Clip.Info)]);
+
+    /// <summary>Writes the target WITHOUT it counting as a user override.</summary>
+    /// <remarks>The notify-and-refresh runs here rather than in the hook because the generated setter
+    /// no-ops on an equal value (<see cref="MergeTarget"/> is a record): re-deriving the SAME target
+    /// after a clip was added still has to badge the new row and re-count the summary.</remarks>
+    private void SetTarget(MergeTarget target, bool overridden)
+    {
+        _isRederiving = true;
+        try
+        {
+            Target = target;
+        }
+        finally
+        {
+            _isRederiving = false;
+        }
+
+        IsTargetOverridden = overridden;
+        OnPropertyChanged(nameof(SelectedFitMode));
+        RefreshBadgesAndSummary();
+    }
+
+    /// <summary>Re-runs conformance for every row and rebuilds the summary. No probe: the
+    /// <see cref="MediaInfo"/> is already in hand, so this is pure arithmetic over what we have.</summary>
+    private void RefreshBadgesAndSummary()
+    {
+        foreach (var clip in Clips)
+        {
+            clip.ApplyTarget(Target);
+        }
+
+        Summary = BuildSummary();
+    }
+
+    private string BuildSummary()
+    {
+        if (Clips.Count < 2)
+        {
+            return NoClipsSummary;
+        }
+
+        var estimate = MergeEstimator.Estimate([.. Clips.Select(c => c.Clip)], Target, _speeds.Load());
+
+        var reencodes = estimate.ReencodeCount switch
+        {
+            0 => "all clips conform",
+            1 => "1 needs re-encoding",
+            var n => string.Create(CultureInfo.InvariantCulture, $"{n} need re-encoding"),
+        };
+
+        var eta = estimate.IsFastPath
+            ? "under 5s"
+            : $"{Clock(estimate.LowEta)}–{Clock(estimate.HighEta)}";
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{Clips.Count} clips · {Clock(estimate.OutputDuration)} output · {reencodes} · est. {eta}");
+    }
+
+    /// <summary>m:ss, or h:mm:ss past an hour. Invariant — this is a duration, not a local time.</summary>
+    private static string Clock(TimeSpan span)
+        => span.ToString(span.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
 }
