@@ -26,6 +26,9 @@ public partial class MergerViewModel : ObservableObject
     /// can tell a proposal apart from a user edit.</summary>
     private bool _isRederiving;
 
+    /// <summary>Non-null exactly while a merge is in flight. Only one at a time (spec D8).</summary>
+    private CancellationTokenSource? _cancellation;
+
     public MergerViewModel(
         IMediaAnalyzer analyzer,
         IMergeService merger,
@@ -65,11 +68,17 @@ public partial class MergerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(OutputPath))]
     private string _outputFileName = "merged.mp4";
 
-    /// <summary>True while a merge is running. The commands that flip it arrive in Task 7; it lives
-    /// here because <see cref="CanMerge"/> — which this task owns — is defined in terms of it.</summary>
+    /// <summary>True while a merge is running. Gates both commands: one merge at a time (spec D8).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanMerge))]
     private bool _isMerging;
+
+    /// <summary>0–100 for the whole merge. ffmpeg's real progress once merging starts — the §6.5
+    /// estimate is only a guess to look at beforehand.</summary>
+    [ObservableProperty] private double _overallPercent;
+
+    /// <summary>What the merge is doing right now, in words, under the overall bar.</summary>
+    [ObservableProperty] private string _statusMessage = "";
 
     /// <summary>The standardization target every clip is conformed to. Derived from the clips, then
     /// freely overridable — see <see cref="IsTargetOverridden"/>.</summary>
@@ -237,6 +246,157 @@ public partial class MergerViewModel : ObservableObject
     [RelayCommand]
     public void ResetTargetToDerived() => SetTarget(Derive(), overridden: false);
 
+    // ---- merging -----------------------------------------------------------
+
+    /// <summary>Runs the merge, streaming progress into the overall bar and each clip's row, and
+    /// finishing with exactly one notification.</summary>
+    [RelayCommand(CanExecute = nameof(CanMerge))]
+    public async Task MergeAsync()
+    {
+        _cancellation = new CancellationTokenSource();
+        IsMerging = true;
+        OverallPercent = 0;
+        StatusMessage = "Preparing…";
+
+        // A second merge must not open with the first one's bars already full.
+        foreach (var clip in Clips)
+        {
+            clip.Percent = 0;
+        }
+
+        try
+        {
+            var request = new MergeRequest([.. Clips.Select(c => c.Clip)], Target, OutputPath);
+
+            // A synchronous IProgress, NOT the BCL Progress<T> — that one posts to the captured
+            // SynchronizationContext, so reports arrive out of order and headless tests race.
+            // Reporting straight through, on ffmpeg's own worker thread, is safe here because every
+            // property it touches is a SCALAR: ObservableObject raises PropertyChanged on the calling
+            // thread and WPF marshals a scalar property change to the UI thread for us. The Clips
+            // COLLECTION is never mutated mid-merge (both commands are disabled while IsMerging), and
+            // that — not the scalars — is the thing WPF would throw on. Do not "fix" this into a
+            // Dispatcher.Invoke: on the UI thread that is a re-entrant wait, and it is how this
+            // deadlocks.
+            var sink = new SyncProgress<MergeProgress>(OnMergeProgress);
+
+            var result = await _merger.MergeAsync(request, sink, _cancellation.Token).ConfigureAwait(true);
+
+            if (result.IsSuccess)
+            {
+                // Result<T>.Value is nullable even on success. Fall back to the path we asked for
+                // rather than suppressing with `!` — a null here would otherwise land in history as a
+                // row whose "open file" button does nothing.
+                var saved = result.Value ?? request.OutputPath;
+
+                OverallPercent = 100;
+                StatusMessage = "Merge complete.";
+                _history.Append(new HistoryEntry(
+                    Title: OutputFileName,
+                    Url: "",                       // a merge has no URL — its inputs are local files
+                    OutputPath: saved,
+                    Format: DescribeTarget(),
+                    Timestamp: DateTimeOffset.Now,
+                    Status: "Completed",
+                    Source: HistorySource.Merge));
+                _notifications.Notify(new Notification(
+                    "Merge complete", $"Saved to {saved}", NotificationSeverity.Success));
+                return;
+            }
+
+            if (_cancellation.IsCancellationRequested)
+            {
+                ReportCanceled();
+                return;
+            }
+
+            var friendly = MergeErrors.Describe(result.Error);
+            StatusMessage = friendly;
+            _notifications.Notify(new Notification("Merge failed", friendly, NotificationSeverity.Error));
+        }
+        catch (OperationCanceledException)
+        {
+            // The engine returns a failure Result for a cancel today, but an OperationCanceledException
+            // escaping it is the ordinary shape of a cancelled Task. Same destination either way.
+            ReportCanceled();
+        }
+        catch (Exception ex)
+        {
+            // The engine promises never to throw for an expected failure. A bug in it must still not
+            // wedge the page at IsMerging = true with a dead Merge button — and AsyncRelayCommand
+            // would swallow the exception into its ExecutionTask, where nobody looks.
+            var friendly = MergeErrors.Describe(ex.Message);
+            StatusMessage = friendly;
+            _notifications.Notify(new Notification("Merge failed", friendly, NotificationSeverity.Error));
+        }
+        finally
+        {
+            IsMerging = false;
+            _cancellation.Dispose();
+            _cancellation = null;
+        }
+    }
+
+    /// <summary>Cancellation is NOT failure. The engine reports it as a failure <c>Result</c>, but
+    /// telling a user who just clicked Cancel that their merge "broke" is a lie — and a red toast for
+    /// an action they took on purpose is worse than no toast at all. No history row either: a merge
+    /// that did not finish is not a merge.</summary>
+    private void ReportCanceled()
+    {
+        StatusMessage = "Merge canceled.";
+        _notifications.Notify(new Notification(
+            "Merge canceled", "Merge canceled.", NotificationSeverity.Info));
+    }
+
+    /// <summary>Only meaningful while a merge is running — there is nothing else to cancel.</summary>
+    public bool CanCancel => IsMerging;
+
+    [RelayCommand(CanExecute = nameof(CanCancel))]
+    public void Cancel() => _cancellation?.Cancel();
+
+    /// <summary>Arrives on ffmpeg's worker thread. See <see cref="MergeAsync"/> for why that is fine.</summary>
+    private void OnMergeProgress(MergeProgress progress)
+    {
+        OverallPercent = progress.OverallPercent;
+        StatusMessage = progress.Status switch
+        {
+            MergeJobStatus.Normalizing => progress.CurrentClip is null
+                ? "Standardizing clips…"
+                : $"Standardizing {progress.CurrentClip}…",
+            MergeJobStatus.Concatenating => "Joining clips…",
+            _ => StatusMessage,
+        };
+
+        // ClipPercents is indexed by MergeRequest.Clips, which IS this list, in this order. Guarding
+        // the length anyway: an out-of-range throw on a progress callback would take a merge that was
+        // otherwise succeeding down with it.
+        for (var i = 0; i < Clips.Count && i < progress.ClipPercents.Count; i++)
+        {
+            Clips[i].Percent = progress.ClipPercents[i];
+        }
+    }
+
+    /// <summary>The history row's "Format" column: what this merge standardized everything to.</summary>
+    private string DescribeTarget()
+        => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{Target.Container.ToString().ToUpperInvariant()} · {Target.Width}x{Target.Height} · {Target.FrameRate.Value:0.###} fps");
+
+    /// <summary>Both commands' enablement hangs off this flag, and ICommand does not listen to
+    /// PropertyChanged — it has to be told.</summary>
+    partial void OnIsMergingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanCancel));
+        MergeCommand.NotifyCanExecuteChanged();
+        CancelCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Reports on the calling thread. See the comment in <see cref="MergeAsync"/> for why
+    /// this is right and the BCL <see cref="Progress{T}"/> is not.</summary>
+    private sealed class SyncProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
+    }
+
     /// <summary>The user edited the target through its public setter, so stop re-deriving it. Adding
     /// a 720p clip must not silently undo a 4K target they deliberately chose.</summary>
     /// <remarks>A re-derivation writes the same property, so it would trip this hook too — hence the
@@ -272,8 +432,10 @@ public partial class MergerViewModel : ObservableObject
 
         OnPropertyChanged(nameof(CanMerge));
 
-        // MergeCommand arrives in Task 7, along with the notification of its CanExecute. It cannot be
-        // named here at all — `?.` would not help, the symbol does not exist yet.
+        // A raised PropertyChanged does not reach ICommand: the button caches its verdict until the
+        // command itself says otherwise. Without this the Merge button stays greyed out after the
+        // user adds the second clip — the exact moment it is supposed to light up.
+        MergeCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>What the clips imply — keeping the user's fit mode, which derivation knows nothing

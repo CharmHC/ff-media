@@ -38,12 +38,24 @@ public class MergerViewModelTests
     {
         public MergeRequest? Request { get; private set; }
 
+        public int Calls { get; private set; }
+
+        /// <summary>The token the ViewModel handed us, kept so a test can prove Cancel really reached
+        /// the engine and did not merely flip a flag on the ViewModel.</summary>
+        public CancellationToken Token { get; private set; }
+
+        /// <summary>Scriptable outcome. Default: succeed, writing to the requested path.</summary>
+        public Func<MergeRequest, IProgress<MergeProgress>?, CancellationToken, Task<Result<string>>> Behavior
+        { get; set; } = (request, _, _) => Task.FromResult(Result<string>.Success(request.OutputPath));
+
         public Task<Result<string>> MergeAsync(
             MergeRequest request, IProgress<MergeProgress>? progress = null, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(request);
             Request = request;
-            return Task.FromResult(Result<string>.Success(request.OutputPath));
+            Token = ct;
+            Calls++;
+            return Behavior(request, progress, ct);
         }
     }
 
@@ -1012,5 +1024,322 @@ public class MergerViewModelTests
         await h.Vm.AddClipsAsync([@"C:\second.mp4"]);
 
         Assert.Contains("CanMerge", raised);
+    }
+
+    // ---- merging -----------------------------------------------------------
+
+    [Fact]
+    public async Task MergeCommand_CanExecute_TracksCanMerge_AsClipsComeAndGo()
+    {
+        // The wiring that decides whether the button is clickable at all. CanMerge alone is not
+        // enough: ICommand caches its verdict until told otherwise, so without a
+        // NotifyCanExecuteChanged() from Recompute() the Merge button stays greyed out forever —
+        // the user adds the second clip and nothing happens.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+        Assert.False(h.Vm.MergeCommand.CanExecute(null));
+
+        var canExecuteChanges = 0;
+        h.Vm.MergeCommand.CanExecuteChanged += (_, _) => canExecuteChanges++;
+
+        await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
+        Assert.False(h.Vm.MergeCommand.CanExecute(null));
+
+        await h.Vm.AddClipsAsync([@"C:\b.mp4"]);
+        Assert.True(h.Vm.MergeCommand.CanExecute(null));
+
+        h.Vm.RemoveClip(h.Vm.Clips[0]);
+        Assert.False(h.Vm.MergeCommand.CanExecute(null));
+
+        Assert.Equal(3, canExecuteChanges); // and the view was actually told, each time
+    }
+
+    [Fact]
+    public async Task Merge_SendsTheClipsInListOrder_WithTheChosenTargetAndOutputPath()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+        h.Vm.MoveDown(h.Vm.Clips[0]);          // order is now b, a
+        h.Vm.SelectedFitMode = FitMode.Fill;
+        h.Vm.OutputFileName = "holiday.mp4";
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        var request = h.Merger.Request;
+        Assert.NotNull(request);
+        Assert.Equal(new[] { @"C:\b.mp4", @"C:\a.mp4" }, request.Clips.Select(c => c.SourcePath).ToArray());
+        Assert.Equal(@"C:\out\holiday.mp4", request.OutputPath);
+        Assert.Equal(h.Vm.Target, request.Target);
+        Assert.Equal(FitMode.Fill, request.Target.FitMode); // the fit mode really rides along
+        Assert.Equal(1, h.Merger.Calls);
+    }
+
+    [Fact]
+    public async Task Merge_OnSuccess_WritesHistoryAndNotifies()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+        h.Vm.OutputFileName = "holiday.mp4";
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        var entry = Assert.Single(h.History.Entries);
+        Assert.Equal(HistorySource.Merge, entry.Source);
+        Assert.Equal("holiday.mp4", entry.Title);
+        Assert.Equal("", entry.Url);                 // a merge has no URL
+        Assert.Equal("Completed", entry.Status);
+        Assert.Equal(@"C:\out\holiday.mp4", entry.OutputPath);
+        Assert.Equal("MP4 · 1920x1080 · 30 fps", entry.Format);
+
+        var notification = Assert.Single(h.Notifications.Sent);
+        Assert.Equal("Merge complete", notification.Title);
+        Assert.Equal(@"Saved to C:\out\holiday.mp4", notification.Message);
+        Assert.Equal(NotificationSeverity.Success, notification.Severity);
+
+        Assert.False(h.Vm.IsMerging);
+        Assert.Equal(100, h.Vm.OverallPercent);
+        Assert.Equal("Merge complete.", h.Vm.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Merge_OnFailure_NotifiesTheFriendlyMessage_AndWritesNoHistory()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+        h.Merger.Behavior = (_, _, _) => Task.FromResult(
+            Result<string>.Failure("ffmpeg failed (exit 1):\nav_write(): No space left on device"));
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.Empty(h.History.Entries); // a merge that did not finish is not a merge
+        var notification = Assert.Single(h.Notifications.Sent);
+        Assert.Equal("Merge failed", notification.Title);
+        Assert.Equal(NotificationSeverity.Error, notification.Severity);
+        Assert.Equal("The disk filled up during the merge. Free some space and try again.", notification.Message);
+        Assert.Equal("The disk filled up during the merge. Free some space and try again.", h.Vm.StatusMessage);
+        Assert.False(h.Vm.IsMerging);
+        Assert.True(h.Vm.MergeCommand.CanExecute(null)); // and the user can try again
+    }
+
+    [Fact]
+    public async Task Merge_WhenTheEngineThrows_IsStillReportedAsAFailure_AndTheButtonComesBack()
+    {
+        // The engine promises never to throw for an expected failure — but a bug in it (or in a
+        // future one) must not leave the page wedged at IsMerging = true with a dead Merge button
+        // and an unobserved exception on the command.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+        h.Merger.Behavior = (_, _, _) => throw new InvalidOperationException("the engine exploded");
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.Empty(h.History.Entries);
+        var notification = Assert.Single(h.Notifications.Sent);
+        Assert.Equal("Merge failed", notification.Title);
+        Assert.Equal(NotificationSeverity.Error, notification.Severity);
+        Assert.Equal("the engine exploded", notification.Message); // verbatim — it is all we have
+        Assert.False(h.Vm.IsMerging);
+        Assert.True(h.Vm.MergeCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Merge_WhenCanceled_IsNotReportedAsAFailure()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+        var tokenWasCanceled = false;
+        h.Merger.Behavior = (_, _, ct) =>
+        {
+            h.Vm.CancelCommand.Execute(null);
+            tokenWasCanceled = ct.IsCancellationRequested; // Cancel reached the ENGINE, not just a flag
+            return Task.FromResult(Result<string>.Failure("Merge canceled."));
+        };
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.True(tokenWasCanceled);
+        Assert.Empty(h.History.Entries);
+        var notification = Assert.Single(h.Notifications.Sent);
+        Assert.Equal("Merge canceled", notification.Title);
+        Assert.Equal("Merge canceled.", notification.Message);
+        Assert.Equal(NotificationSeverity.Info, notification.Severity);
+        Assert.Equal("Merge canceled.", h.Vm.StatusMessage);
+        Assert.False(h.Vm.IsMerging);
+    }
+
+    [Fact]
+    public async Task Merge_WhenCanceled_IsNotReportedAsAFailure_EvenIfTheEngineThrowsTheCancellation()
+    {
+        // The engine returns a failure Result today, but an OperationCanceledException escaping it is
+        // the ordinary shape of a cancelled Task — and it must reach the SAME "Information, no
+        // history, no red toast" path, not the crash handler.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+        h.Merger.Behavior = (_, _, ct) =>
+        {
+            h.Vm.CancelCommand.Execute(null);
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(Result<string>.Success("unreachable"));
+        };
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.Empty(h.History.Entries);
+        var notification = Assert.Single(h.Notifications.Sent);
+        Assert.Equal("Merge canceled", notification.Title);
+        Assert.Equal(NotificationSeverity.Info, notification.Severity);
+        Assert.Equal("Merge canceled.", h.Vm.StatusMessage);
+        Assert.False(h.Vm.IsMerging);
+    }
+
+    [Fact]
+    public async Task CancelCommand_IsEnabledOnlyWhileMerging()
+    {
+        var h = await BuildWithClipsAsync(2);
+        Assert.False(h.Vm.CancelCommand.CanExecute(null));
+
+        var gate = new TaskCompletionSource();
+        h.Merger.Behavior = async (request, _, _) =>
+        {
+            Assert.True(h.Vm.CancelCommand.CanExecute(null));
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var merging = h.Vm.MergeCommand.ExecuteAsync(null);
+        gate.SetResult();
+        await merging;
+
+        Assert.False(h.Vm.CancelCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void CancelCommand_WithNoMergeRunning_IsASilentNoOp()
+    {
+        var h = Build();
+
+        h.Vm.CancelCommand.Execute(null); // must not NullReference on the absent CTS
+
+        Assert.Empty(h.Notifications.Sent);
+        Assert.False(h.Vm.IsMerging);
+    }
+
+    [Fact]
+    public async Task Merge_ForwardsProgressToTheOverallBarAndEachClipRow()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720, "vp9")); // b is the one that must be re-encoded
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        var seen = new List<string>();
+        h.Merger.Behavior = (request, progress, _) =>
+        {
+            Assert.NotNull(progress);
+            progress.Report(new MergeProgress(MergeJobStatus.Normalizing, 40, "b.mp4", [100, 30]));
+            seen.Add(h.Vm.StatusMessage);
+            seen.Add(h.Vm.Clips[1].ProgressText);
+            Assert.Equal(40, h.Vm.OverallPercent);
+            Assert.Equal(30, h.Vm.Clips[1].Percent);
+
+            progress.Report(new MergeProgress(MergeJobStatus.Concatenating, 97, null, [100, 100]));
+            seen.Add(h.Vm.StatusMessage);
+            return Task.FromResult(Result<string>.Success(request.OutputPath));
+        };
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "Standardizing b.mp4…", "Re-encoding… 30%", "Joining clips…" }, seen.ToArray());
+        Assert.Equal(100, h.Vm.OverallPercent); // success pins the bar to full
+        Assert.Equal(100, h.Vm.Clips[0].Percent);
+        Assert.Equal(100, h.Vm.Clips[1].Percent);
+    }
+
+    [Fact]
+    public async Task Merge_ResetsEveryRowsProgress_BeforeItStarts()
+    {
+        // A second merge must not open with the first one's bars already full.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720, "vp9"));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+        h.Merger.Behavior = (request, progress, _) =>
+        {
+            progress!.Report(new MergeProgress(MergeJobStatus.Normalizing, 50, "b.mp4", [100, 100]));
+            return Task.FromResult(Result<string>.Success(request.OutputPath));
+        };
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+        Assert.Equal(100, h.Vm.Clips[1].Percent);
+
+        var atStart = new List<double>();
+        h.Merger.Behavior = (request, _, _) =>
+        {
+            atStart.AddRange(h.Vm.Clips.Select(c => c.Percent));
+            return Task.FromResult(Result<string>.Success(request.OutputPath));
+        };
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { 0d, 0d }, atStart.ToArray());
+        Assert.Equal(2, h.Merger.Calls);
+    }
+
+    [Fact]
+    public async Task Merge_ToleratesAProgressReportWithFewerPercentsThanRows()
+    {
+        // Defensive: the engine indexes ClipPercents by MergeRequest.Clips, so a short list would be
+        // a bug — but an IndexOutOfRange thrown on a progress callback would take the merge down with
+        // it, turning a cosmetic defect into a failed merge.
+        var h = await BuildWithClipsAsync(2);
+        h.Merger.Behavior = (request, progress, _) =>
+        {
+            progress!.Report(new MergeProgress(MergeJobStatus.Normalizing, 10, "0.mp4", [55]));
+            return Task.FromResult(Result<string>.Success(request.OutputPath));
+        };
+
+        await h.Vm.MergeCommand.ExecuteAsync(null);
+
+        Assert.Equal(55, h.Vm.Clips[0].Percent);
+        Assert.Equal(0, h.Vm.Clips[1].Percent);
+        Assert.Equal(100, h.Vm.OverallPercent);
+    }
+
+    [Fact]
+    public async Task Merge_IsDisabledWhileMerging()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info());
+        h.Analyzer.Returns(@"C:\b.mp4", Info());
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        var gate = new TaskCompletionSource();
+        h.Merger.Behavior = async (request, _, _) =>
+        {
+            Assert.True(h.Vm.IsMerging);
+            Assert.False(h.Vm.CanMerge);
+            Assert.False(h.Vm.MergeCommand.CanExecute(null)); // one merge at a time (spec D8)
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var merging = h.Vm.MergeCommand.ExecuteAsync(null);
+        gate.SetResult();
+        await merging;
+
+        Assert.True(h.Vm.MergeCommand.CanExecute(null));
+        Assert.Equal(1, h.Merger.Calls);
     }
 }
