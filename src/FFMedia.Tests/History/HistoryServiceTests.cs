@@ -133,6 +133,61 @@ public class HistoryServiceTests
         Assert.False(File.Exists(path + ".bak"));
     }
 
+    [Theory]
+    // A Source written by a FUTURE build of FFMedia that has a tool this build knows nothing about.
+    [InlineData("\"Sideloaded\"")]
+    [InlineData("null")]
+    [InlineData("7")]
+    public void UnrecognizedSource_DegradesTheField_AndNeverDestroysTheFile(string sourceLiteral)
+    {
+        // The failure mode this guards is wildly out of proportion to the fault: the strict enum
+        // converter THROWS on a name it does not know, JsonStore quarantines the unparseable file
+        // to .bak and returns an empty document — so ONE unrecognized value silently erases the
+        // user's ENTIRE history. FFMedia is a toolbox that gains tools; the day a third
+        // HistorySource ships, every older build would wipe the history of anyone who ran both.
+        // A row whose origin we cannot name is still a row worth keeping.
+        var dir = TempDir();
+        var path = Path.Combine(dir, "history.json");
+        File.WriteAllText(path, $$"""
+        {
+          "Version": 1,
+          "Entries": [
+            {
+              "Title": "From the future",
+              "Url": "",
+              "OutputPath": "C:\\out\\x.mp4",
+              "Format": "Mp4 P1080",
+              "Timestamp": "2026-07-01T10:00:00+00:00",
+              "Status": "Completed",
+              "Source": {{sourceLiteral}}
+            }
+          ]
+        }
+        """);
+
+        var svc = new HistoryService(dir, NullLogger<HistoryService>.Instance);
+
+        var entry = Assert.Single(svc.Query());
+        Assert.Equal("From the future", entry.Title);   // the row SURVIVED
+        Assert.Equal(HistorySource.Download, entry.Source); // only the unknown field degraded
+        Assert.False(File.Exists(path + ".bak"));       // and the file was not quarantined
+    }
+
+    [Fact]
+    public void KnownSource_IsStillReadExactly_TheToleranceIsNotAWildcard()
+    {
+        // The tolerant converter must not have become a converter that ignores its input.
+        var dir = TempDir();
+        var svc = new HistoryService(dir, NullLogger<HistoryService>.Instance);
+        svc.Append(new HistoryEntry(
+            "holiday.mp4", "", @"C:\out\holiday.mp4", "Mp4 1920x1080",
+            DateTimeOffset.UnixEpoch, "Completed", HistorySource.Merge));
+
+        var reloaded = new HistoryService(dir, NullLogger<HistoryService>.Instance);
+
+        Assert.Equal(HistorySource.Merge, Assert.Single(reloaded.Query()).Source);
+    }
+
     [Fact]
     public void HistoryEntry_OmittedSource_DeserializesToDownload_NotAnUninitializedValue()
     {
