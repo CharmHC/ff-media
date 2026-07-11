@@ -32,10 +32,10 @@ public static class DiskSpaceGuard
             + $"Free up {Format(needed - free)} and try again.");
     }
 
-    /// <summary>Applies <see cref="SafetyMargin"/> in exact integer arithmetic (+1/5, rounded up).
-    /// A <c>(long)(bytes * 1.2)</c> would be at the mercy of 1.2 being inexact in binary — and, for
-    /// a huge estimate, would wrap the cast to <see cref="long.MinValue"/> and wave the merge
-    /// through on a full disk. Saturates instead.</summary>
+    /// <summary>Applies <see cref="SafetyMargin"/> in exact integer arithmetic (+1/5, rounded up),
+    /// so the pass/fail boundary does not float on 1.2 being inexact in binary — a
+    /// <c>(long)(bytes * 1.2)</c> under-applies the margin for most values. Saturates rather than
+    /// overflowing on a huge estimate.</summary>
     private static long WithMargin(long bytes)
     {
         var extra = (bytes / 5) + (bytes % 5 == 0 ? 0 : 1);

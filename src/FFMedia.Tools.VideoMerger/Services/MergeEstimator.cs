@@ -74,9 +74,10 @@ public static class MergeEstimator
 
     private static long SaturatingAdd(long a, long b) => a > long.MaxValue - b ? long.MaxValue : a + b;
 
-    /// <summary>Seconds to a <see cref="TimeSpan"/>, at tick resolution and without ever throwing:
-    /// infinite/NaN/out-of-range inputs saturate. (Built from ticks rather than
-    /// <see cref="TimeSpan.FromSeconds(double)"/>, which rounds to whole milliseconds.)</summary>
+    /// <summary>Seconds to a <see cref="TimeSpan"/> without ever throwing: infinite, NaN and
+    /// out-of-range inputs saturate. Built from ticks rather than
+    /// <see cref="TimeSpan.FromSeconds(double)"/>, which <em>throws</em> on infinity — reachable
+    /// here from a denormally small persisted speed factor.</summary>
     private static TimeSpan ToDuration(double seconds)
     {
         if (double.IsNaN(seconds) || seconds <= 0)
@@ -88,8 +89,10 @@ public static class MergeEstimator
         return ticks >= long.MaxValue ? TimeSpan.MaxValue : TimeSpan.FromTicks((long)ticks);
     }
 
-    /// <summary>Byte count without an unchecked double→long wrap (which would silently produce
-    /// <see cref="long.MinValue"/> and make the disk-space guard wave a huge merge through).</summary>
+    /// <summary>Byte count, clamped to non-negative. Since .NET 7 a double→long cast saturates
+    /// rather than wrapping, so the explicit bounds are belt-and-braces — but this number is what
+    /// the disk-space guard reserves, and a negative one would wave a huge merge onto a full disk,
+    /// so state the floor rather than lean on a runtime detail.</summary>
     private static long ToBytes(double bytes)
     {
         if (double.IsNaN(bytes) || bytes <= 0)
