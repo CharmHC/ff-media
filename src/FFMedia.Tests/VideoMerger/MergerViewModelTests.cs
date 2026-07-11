@@ -756,8 +756,10 @@ public class MergerViewModelTests
     }
 
     [Fact]
-    public async Task SelectedFitMode_WritesThroughToTheTarget_AndCountsAsAnOverride()
+    public async Task SelectedFitMode_WritesThroughToTheTarget_ButIsNotATargetOverride()
     {
+        // Fit mode says nothing about the resolution/codec/rate we are aiming at — only how a
+        // mismatched clip gets there. Treating it as an override would freeze the target.
         var h = await BuildWithClipsAsync(2);
         Assert.False(h.Vm.IsTargetOverridden);
 
@@ -765,7 +767,52 @@ public class MergerViewModelTests
 
         Assert.Equal(FitMode.Fill, h.Vm.Target.FitMode);
         Assert.Equal(FitMode.Fill, h.Vm.SelectedFitMode);
-        Assert.True(h.Vm.IsTargetOverridden);
+        Assert.False(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task ChoosingAFitModeBeforeAddingClips_DoesNotFreezeTheTargetAtTheDefault()
+    {
+        // The disaster this guards. Fit mode is a merge-wide preference, so setting it FIRST is a
+        // natural order. If that latched IsTargetOverridden, derivation would never run: these 4K
+        // clips would land against the 1080p default, be silently downscaled, and take the slow
+        // path — no error, no warning, just a worse merge than the user asked for.
+        var h = Build();
+        h.Vm.SelectedFitMode = FitMode.Fill;
+
+        h.Analyzer.Returns(@"C:\a.mp4", Info(3840, 2160));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(3840, 2160));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        Assert.Equal(3840, h.Vm.Target.Width);
+        Assert.Equal(2160, h.Vm.Target.Height);
+        Assert.Equal(FitMode.Fill, h.Vm.Target.FitMode); // and the preference survived derivation
+        Assert.True(h.Vm.Clips[0].IsConforming);         // so the clips are NOT needlessly re-encoded
+    }
+
+    [Fact]
+    public async Task ReDerivingTheTarget_KeepsTheChosenFitMode()
+    {
+        var h = await BuildWithClipsAsync(2);
+        h.Vm.SelectedFitMode = FitMode.Stretch;
+
+        h.Analyzer.Returns(@"C:\extra.mp4", Info(1280, 720));
+        await h.Vm.AddClipsAsync([@"C:\extra.mp4"]); // triggers a re-derivation
+
+        Assert.Equal(FitMode.Stretch, h.Vm.SelectedFitMode);
+    }
+
+    [Fact]
+    public async Task ResetTargetToDerived_KeepsTheFitMode_WhichDerivationCannotInfer()
+    {
+        var h = await BuildWithClipsAsync(2);
+        h.Vm.SelectedFitMode = FitMode.Fill;
+        h.Vm.Target = h.Vm.Target with { Width = 640, Height = 480 };
+
+        h.Vm.ResetTargetToDerived();
+
+        Assert.Equal(1920, h.Vm.Target.Width);          // the resolution went back to the proposal
+        Assert.Equal(FitMode.Fill, h.Vm.SelectedFitMode); // the preference did not
     }
 
     [Fact]

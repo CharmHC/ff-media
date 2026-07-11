@@ -86,10 +86,15 @@ public partial class MergerViewModel : ObservableObject
 
     public IReadOnlyList<FitMode> FitModes { get; } = Enum.GetValues<FitMode>();
 
-    /// <summary>The fit mode lives on the target, but the page binds a plain dropdown, so surface it
-    /// as a settable scalar. Writing the value already in force is NOT an edit — a ComboBox echoes
-    /// its own selection back when the page loads, and treating that as an override would freeze the
-    /// target at whatever the first clip happened to imply.</summary>
+    /// <summary>How a clip whose aspect does not match the target is fitted into it.</summary>
+    /// <remarks><para>The fit mode rides on the target because that is what the engine consumes, but
+    /// it is NOT a target override: it says nothing about the resolution, codec or rate we are aiming
+    /// at, only about how a mismatched clip gets there. So choosing it must never latch
+    /// <see cref="IsTargetOverridden"/>, and it must SURVIVE a re-derivation.</para>
+    /// <para>Latching it would be a quiet disaster. Fit mode is a merge-wide preference, so setting it
+    /// BEFORE adding any clips is a perfectly natural order — and if that froze the target, derivation
+    /// would never run: two 4K clips would land against the 1080p default, be silently downscaled, and
+    /// take the slow path, with no error shown anywhere.</para></remarks>
     public FitMode SelectedFitMode
     {
         get => Target.FitMode;
@@ -97,7 +102,8 @@ public partial class MergerViewModel : ObservableObject
         {
             if (Target.FitMode != value)
             {
-                Target = Target with { FitMode = value };
+                // Carry the existing override state through — never manufacture one.
+                SetTarget(Target with { FitMode = value }, IsTargetOverridden);
             }
         }
     }
@@ -270,10 +276,16 @@ public partial class MergerViewModel : ObservableObject
         // named here at all — `?.` would not help, the symbol does not exist yet.
     }
 
+    /// <summary>What the clips imply — keeping the user's fit mode, which derivation knows nothing
+    /// about and must not silently reset (it is a preference, not something we can infer).</summary>
     private MergeTarget Derive()
-        => Clips.Count == 0
+    {
+        var derived = Clips.Count == 0
             ? MergeTarget.Default // Derive() throws on an empty list, and there is nothing to propose
             : MergeTargetDerivation.Derive([.. Clips.Select(c => c.Clip.Info)]);
+
+        return derived with { FitMode = Target.FitMode };
+    }
 
     /// <summary>Writes the target WITHOUT it counting as a user override.</summary>
     /// <remarks>The notify-and-refresh runs here rather than in the hook because the generated setter
