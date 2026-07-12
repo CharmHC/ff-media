@@ -13,8 +13,13 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     </Page.Resources>
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="24" MaxWidth="900" HorizontalAlignment="Left">
+    <!-- No ScrollViewer here, deliberately — and no other page in the app has one either. WPF-UI's
+         NavigationViewContentPresenter already wraps every page in one. A second, nested ScrollViewer
+         is handed unbounded height by the outer one, so it can never scroll (ScrollableHeight = 0) —
+         yet WPF's ScrollViewer marks mouse-wheel events HANDLED even when it cannot move. It therefore
+         swallows every wheel tick and the shell's scroller, which does have room to scroll, never sees
+         them: the page looked frozen everywhere except inside the clip list. -->
+    <StackPanel Margin="24" MaxWidth="900" HorizontalAlignment="Left">
 
             <TextBlock Text="Video Merger" FontSize="24" FontWeight="SemiBold" />
             <TextBlock Text="Add clips, put them in order, and join them into one video."
@@ -28,18 +33,30 @@
                            VerticalAlignment="Center" Margin="12,0,0,0" Opacity="0.7" />
             </StackPanel>
 
-            <ListView x:Name="ClipList" ItemsSource="{Binding Clips}" MinHeight="120" MaxHeight="340"
-                      Margin="0,0,0,12" AllowDrop="True"
-                      PreviewMouseLeftButtonDown="OnClipMouseDown"
-                      MouseMove="OnClipMouseMove"
-                      DragOver="OnClipDragOver"
-                      Drop="OnClipDropped">
-                <ListView.ItemContainerStyle>
-                    <Style TargetType="ListViewItem">
+            <!-- ui:ListView, NOT the plain WPF ListView: WPF-UI's ControlsDictionary keys its implicit
+                 styles to its OWN subclasses (Wpf.Ui.Controls.ListView / ListViewItem) and ships no
+                 style for System.Windows.Controls.ListView at all — so a plain ListView keeps WPF's
+                 built-in LIGHT chrome and renders as a white box on a dark page. Same family as the
+                 black page text in SDD §13. ui:ListViewItem derives from the WPF one, so the
+                 drag-to-reorder code-behind's `is ListViewItem` container check still holds. -->
+            <ui:ListView x:Name="ClipList" ItemsSource="{Binding Clips}" MinHeight="120" MaxHeight="340"
+                         Margin="0,0,0,12" AllowDrop="True"
+                         Padding="4"
+                         Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                         BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+                         BorderThickness="1"
+                         PreviewMouseLeftButtonDown="OnClipMouseDown"
+                         MouseMove="OnClipMouseMove"
+                         DragOver="OnClipDragOver"
+                         Drop="OnClipDropped">
+                <ui:ListView.ItemContainerStyle>
+                    <!-- BasedOn keeps WPF-UI's themed row template; a TargetType-only Style would
+                         silently fall back to WPF's default light one. -->
+                    <Style TargetType="{x:Type ui:ListViewItem}" BasedOn="{StaticResource {x:Type ui:ListViewItem}}">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                     </Style>
-                </ListView.ItemContainerStyle>
-                <ListView.ItemTemplate>
+                </ui:ListView.ItemContainerStyle>
+                <ui:ListView.ItemTemplate>
                     <DataTemplate>
                         <Grid Margin="0,4">
                             <Grid.ColumnDefinitions>
@@ -83,13 +100,18 @@
                             </StackPanel>
                         </Grid>
                     </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
+                </ui:ListView.ItemTemplate>
+            </ui:ListView>
 
             <!-- 2. Order -->
-            <ui:Button Content="Shuffle" Icon="{ui:SymbolIcon ArrowShuffle24}"
-                       ToolTip="Randomize the order, leaving locked clips where they are"
-                       Command="{Binding ShuffleCommand}" Margin="0,0,0,20" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                <ui:Button Content="Shuffle" Icon="{ui:SymbolIcon ArrowShuffle24}"
+                           ToolTip="Randomize the order, leaving locked clips where they are"
+                           Command="{Binding ShuffleCommand}" />
+                <ui:Button Content="Clear all" Icon="{ui:SymbolIcon Dismiss24}" Margin="8,0,0,0"
+                           ToolTip="Remove every clip from the list"
+                           Command="{Binding ClearClipsCommand}" />
+            </StackPanel>
 
             <!-- 3. Output — the derived target, every field overridable -->
             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
@@ -180,6 +202,5 @@
             <ProgressBar Value="{Binding OverallPercent, Mode=OneWay}" Maximum="100" Height="6" />
             <TextBlock Text="{Binding StatusMessage}" Opacity="0.8" Margin="0,6,0,0" TextWrapping="Wrap" />
 
-        </StackPanel>
-    </ScrollViewer>
+    </StackPanel>
 </Page>

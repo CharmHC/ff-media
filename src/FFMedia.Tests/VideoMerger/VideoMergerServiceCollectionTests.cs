@@ -141,13 +141,15 @@ public class VideoMergerServiceCollectionTests
     }
 
     [Fact]
-    public void AddVideoMerger_GivesEachNavigationItsOwnViewModel()
+    public void AddVideoMerger_SharesOneViewModelAcrossNavigations_SoTheClipListSurvives()
     {
-        // Transient, like the downloader's: a fresh page must not open holding the last merge's clip
-        // list and progress bars.
+        // Deliberately NOT transient (which is what this shipped as, and what the downloader uses).
+        // The merger's clip list lives in the ViewModel, so a transient one silently threw away every
+        // clip the user had added the moment they clicked Settings and came back. The downloader gets
+        // away with transient because its queue lives in a singleton DownloadManager, not the VM.
         using var provider = BuildWithUi();
 
-        Assert.NotSame(
+        Assert.Same(
             provider.GetRequiredService<MergerViewModel>(), provider.GetRequiredService<MergerViewModel>());
     }
 

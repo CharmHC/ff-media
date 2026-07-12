@@ -66,7 +66,14 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ITool, VideoMergerTool>();
         services.AddSingleton<IToolPage>(new ToolPage("video-merger", typeof(MergerPage)));
-        services.AddTransient<MergerViewModel>();
+
+        // Singleton, unlike the downloader's: the merger's clip list lives in the ViewModel (the
+        // downloader's queue lives in a singleton DownloadManager instead), so a transient one loses
+        // every clip the moment the user visits Settings and comes back. The list now survives
+        // navigation and resets only when the app closes — which also keeps a merge running while the
+        // user is on another page. MergerPage stays transient and only sets DataContext, so a fresh
+        // page binds to the surviving ViewModel rather than reinitializing it.
+        services.AddSingleton<MergerViewModel>();
         services.AddTransient<MergerPage>();
 
         return services;

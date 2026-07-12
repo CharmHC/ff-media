@@ -56,8 +56,8 @@ public partial class MergerViewModel : ObservableObject
     /// <summary>The clip list, in the order it will be concatenated. Bound directly to the page.</summary>
     public ObservableCollection<MergeClipViewModel> Clips { get; } = [];
 
-    /// <summary>Seeds the shuffle. Settable so tests are deterministic; the UI re-seeds it from the
-    /// clock on every Shuffle click.</summary>
+    /// <summary>Seeds the NEXT shuffle. Settable so tests are deterministic; <see cref="Shuffle"/>
+    /// re-seeds it after each use, so consecutive clicks do not replay one permutation.</summary>
     public int ShuffleSeed { get; set; } = Environment.TickCount;
 
     [ObservableProperty]
@@ -342,11 +342,26 @@ public partial class MergerViewModel : ObservableObject
             }
 
             var probe = await _analyzer.AnalyzeAsync(path).ConfigureAwait(true);
-            if (!probe.IsSuccess || probe.Value is null || probe.Value.Video is null)
+
+            // A probe that FAILED and a probe that succeeded on a file with no video track are two
+            // different problems, and lumping them together actively misleads. ffprobe.exe is
+            // git-ignored and fetched by build/fetch-binaries.ps1 — when it is missing, EVERY file
+            // fails to probe, and reporting that as "not a video" blames the user's perfectly good
+            // .mp4 for a missing binary. The analyzer already says what actually went wrong; say it.
+            if (!probe.IsSuccess || probe.Value is null)
+            {
+                _notifications.Notify(new Notification(
+                    $"Could not read {Path.GetFileName(path)}",
+                    probe.Error ?? "The file could not be analyzed.",
+                    NotificationSeverity.Warning));
+                continue;
+            }
+
+            if (probe.Value.Video is null)
             {
                 _notifications.Notify(new Notification(
                     "Not a video",
-                    $"{Path.GetFileName(path)} could not be read as a video and was not added.",
+                    $"{Path.GetFileName(path)} has no video track and was not added.",
                     NotificationSeverity.Warning));
                 continue;
             }
@@ -372,6 +387,24 @@ public partial class MergerViewModel : ObservableObject
             ResyncLocks();
             Recompute();
         }
+    }
+
+    /// <summary>Empties the clip list.</summary>
+    [RelayCommand(CanExecute = nameof(CanEditClips))]
+    public void ClearClips()
+    {
+        if (IsMerging)
+        {
+            return; // a mutator like any other — the merge holds a snapshot indexed by position
+        }
+
+        if (Clips.Count == 0)
+        {
+            return;
+        }
+
+        Clips.Clear();
+        Recompute(); // no ResyncLocks: there is nothing left to pin
     }
 
     [RelayCommand(CanExecute = nameof(CanEditClips))]
@@ -470,6 +503,11 @@ public partial class MergerViewModel : ObservableObject
         }
 
         ResyncLocks();
+
+        // Re-seed, or every click replays the SAME permutation for the life of the page — and any
+        // index that permutation maps to itself is a row the user can never move, however many times
+        // they click. (It is a fixed seed, not a fixed shuffle: Ordering.Shuffle is unbiased.)
+        ShuffleSeed = Random.Shared.Next();
     }
 
     /// <summary>A locked row is pinned to the index it currently OCCUPIES. Removing or moving a
@@ -660,6 +698,7 @@ public partial class MergerViewModel : ObservableObject
         CancelCommand.NotifyCanExecuteChanged();
         AddClipsCommand.NotifyCanExecuteChanged();
         RemoveClipCommand.NotifyCanExecuteChanged();
+        ClearClipsCommand.NotifyCanExecuteChanged();
         MoveUpCommand.NotifyCanExecuteChanged();
         MoveDownCommand.NotifyCanExecuteChanged();
         ShuffleCommand.NotifyCanExecuteChanged();

@@ -212,15 +212,36 @@ public class MergerViewModelTests
         // whole merge later, after the user has spent minutes ordering clips.
         var h = Build();
         h.Analyzer.Returns(@"C:\good.mp4", Info());
-        h.Analyzer.Rejects(@"C:\notes.txt", "no video stream");
+        h.Analyzer.Rejects(@"C:\notes.txt", "ffprobe could not read 'notes.txt': invalid data found");
 
         await h.Vm.AddClipsAsync([@"C:\good.mp4", @"C:\notes.txt"]);
 
         Assert.Equal(new[] { "good.mp4" }, Names(h.Vm));
         var notification = Assert.Single(h.Notifications.Sent);
-        Assert.Equal("Not a video", notification.Title);
-        Assert.Equal("notes.txt could not be read as a video and was not added.", notification.Message);
+        Assert.Equal("Could not read notes.txt", notification.Title);
         Assert.Equal(NotificationSeverity.Warning, notification.Severity);
+    }
+
+    [Fact]
+    public async Task AddClipsAsync_WhenTheProbeFails_SurfacesTheAnalyzersOwnReason()
+    {
+        // The bug this pins: a FAILED probe was reported as "Not a video: x.mp4 could not be read as
+        // a video" — the analyzer's actual reason was thrown away. When ffprobe.exe was simply MISSING
+        // (it is git-ignored and fetched by build/fetch-binaries.ps1), every single file the user
+        // added produced that message, so a perfectly good .mp4 was blamed for a missing binary and
+        // the user went looking at their file. The analyzer already says exactly what went wrong —
+        // say it.
+        var h = Build();
+        h.Analyzer.Rejects(
+            @"C:\holiday.mp4",
+            "Could not run ffprobe: The system cannot find the file specified.");
+
+        await h.Vm.AddClipsAsync([@"C:\holiday.mp4"]);
+
+        Assert.Empty(h.Vm.Clips);
+        var notification = Assert.Single(h.Notifications.Sent);
+        Assert.Contains("Could not run ffprobe", notification.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("could not be read as a video", notification.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -236,7 +257,8 @@ public class MergerViewModelTests
 
         Assert.Equal(new[] { "good.mp4" }, Names(h.Vm));
         var notification = Assert.Single(h.Notifications.Sent);
-        Assert.Equal("voiceover.m4a could not be read as a video and was not added.", notification.Message);
+        Assert.Equal("Not a video", notification.Title);
+        Assert.Equal("voiceover.m4a has no video track and was not added.", notification.Message);
         Assert.Equal(NotificationSeverity.Warning, notification.Severity);
     }
 
@@ -401,6 +423,69 @@ public class MergerViewModelTests
         Assert.Equal(2, h.Analyzer.Probed.Count); // it is genuinely re-probed, not resurrected
     }
 
+    // ---- clear all ---------------------------------------------------------
+
+    [Fact]
+    public async Task ClearClips_DropsEveryClip()
+    {
+        var h = await BuildWithClipsAsync(4);
+
+        h.Vm.ClearClips();
+
+        Assert.Empty(h.Vm.Clips);
+    }
+
+    [Fact]
+    public async Task ClearClips_LetsTheSameFilesBeAddedAgain()
+    {
+        // Same guarantee RemoveClip carries: clearing must genuinely drop the clips, not leave a
+        // ghost that makes a re-add a silent no-op (the list de-dupes by path).
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.ClearClips();
+        await h.Vm.AddClipsAsync([@"C:\0.mp4", @"C:\1.mp4"]);
+
+        Assert.Equal(new[] { "0.mp4", "1.mp4" }, Names(h.Vm));
+    }
+
+    [Fact]
+    public void ClearClips_OnAnEmptyList_IsANoOp()
+    {
+        var h = Build();
+
+        h.Vm.ClearClips();
+
+        Assert.Empty(h.Vm.Clips);
+    }
+
+    [Fact]
+    public async Task ClearClips_WhileMerging_IsRefused()
+    {
+        // The list is frozen during a merge (CanEditClips). Clear is a mutator like any other, and
+        // the merge already snapshotted the clips — wiping the rows would strand the progress plumbing,
+        // which indexes them by position.
+        var h = await BuildWithClipsAsync(3);
+
+        var gate = new TaskCompletionSource();
+        h.Merger.Behavior = async (request, _, _) =>
+        {
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var merging = h.Vm.MergeCommand.ExecuteAsync(null);
+        Assert.True(h.Vm.IsMerging);
+
+        Assert.False(h.Vm.ClearClipsCommand.CanExecute(null));
+        h.Vm.ClearClips(); // and the guard holds even when called straight past CanExecute
+        Assert.Equal(3, h.Vm.Clips.Count);
+
+        gate.SetResult();
+        await merging;
+
+        Assert.True(h.Vm.ClearClipsCommand.CanExecute(null));
+    }
+
     // ---- shuffle -----------------------------------------------------------
 
     [Fact]
@@ -452,6 +537,63 @@ public class MergerViewModelTests
         b.Vm.Shuffle();
 
         Assert.Equal(Names(a.Vm), Names(b.Vm));
+    }
+
+    [Fact]
+    public async Task Shuffle_ClickedRepeatedly_DoesNotPinAnyRowForever()
+    {
+        // The bug this pins: ShuffleSeed was set once at construction and never re-seeded, so every
+        // click built `new Random(sameSeed)` and replayed the SAME permutation. Any index that
+        // permutation maps to itself is a fixed point — a row that can never move, however many times
+        // the user clicks. (~63% of seeds pin at least one row; the user's pinned index 1.)
+        //
+        // Every OTHER shuffle test assigns ShuffleSeed immediately before each Shuffle() call, so they
+        // all simulate a re-seeding UI that did not exist. This test must NOT touch the seed — that is
+        // the whole axis the invariant is about, and it is what the real button does.
+        var h = await BuildWithClipsAsync(6);
+
+        var seenAt = new HashSet<string>[6];
+        for (var i = 0; i < 6; i++)
+        {
+            seenAt[i] = new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        for (var click = 0; click < 30; click++)
+        {
+            h.Vm.Shuffle();
+
+            var names = Names(h.Vm);
+            Assert.Equal(6, names.Distinct().Count()); // nothing lost or duplicated, ever
+            for (var i = 0; i < 6; i++)
+            {
+                seenAt[i].Add(names[i]);
+            }
+        }
+
+        // Across 30 clicks a genuinely re-seeded shuffle puts at least two different clips in every
+        // slot. A frozen slot (the bug) holds exactly one clip for all 30.
+        for (var i = 0; i < 6; i++)
+        {
+            Assert.True(
+                seenAt[i].Count > 1,
+                $"Row {i} held only [{string.Join(", ", seenAt[i])}] across 30 shuffles — it is pinned forever.");
+        }
+    }
+
+    [Fact]
+    public async Task Shuffle_ClickedRepeatedly_StillHonoursLocks()
+    {
+        // Re-seeding must not cost us the lock guarantee — the same clicks, with a lock held.
+        var h = await BuildWithClipsAsync(6);
+        h.Vm.Clips[2].SetLock(locked: true, index: 2);
+
+        for (var click = 0; click < 30; click++)
+        {
+            h.Vm.Shuffle();
+
+            Assert.Equal("2.mp4", h.Vm.Clips[2].FileName);
+            Assert.Equal(6, Names(h.Vm).Distinct().Count());
+        }
     }
 
     [Fact]
