@@ -71,7 +71,7 @@ _Newest first. One entry per completed task/session._
   trusting the exit code, asserting real 1280×720 dimensions and ~4 s duration (proving both clips
   actually landed in the file, not just one).
 - **Verified:** Release build **0 warnings / 0 errors**; unit tests **635/635** pass
-  (`Category!=Integration`, up from 631 before this task); merge integration tests **4/4** pass against
+  (`Category!=Integration`, unchanged — this task added only an integration test + docs, not unit tests); merge integration tests **4/4** pass against
   the real bundled ffmpeg/ffprobe (the 3 pre-existing ones + this new one). `git status --short` showed
   only the test file changed — no stray `.exe`/`bin`/`obj`. SDD → **v0.18** (the v0.17 row's closing
   "design only — no code in this change" is now corrected; it wasn't true as of this task).
