@@ -67,12 +67,41 @@ _Newest first. One entry per completed task/session._
   `YtDlpErrors`, instead. `IconGlyph = "VideoClipMultiple24"`, pinned by a test that parses it back to
   a real `SymbolRegular`, because the shell falls back to `Apps24` on an unparseable name and a typo
   would degrade **silently**.
-- **Verified:** Release build **0/0**; **579/579** unit tests pass (`Category!=Integration`); and the
+- **The composition bug — and why the final whole-branch review exists.** Every task passed its own
+  review; the *whole* was still broken. **The clip list stayed editable during a merge.** Task 5 built
+  the list commands, Task 7's threading argument *assumed the list was frozen* (it says so in a
+  comment), and Task 8 added a drag gesture that bypasses commands entirely. Nobody was wrong — the
+  composition was. Reordering mid-merge puts clip M's progress on row N (`ClipPercents` is indexed by
+  the request snapshot taken at click time); a removed clip is still in the output; and worst,
+  `OnMergeProgress` runs on **ffmpeg's stdout callback thread** and indexes `Clips`, so a concurrent
+  UI-thread mutation throws inside a `Process.OutputDataReceived` handler — which has **no catch
+  anywhere up the stack**, taking the app down. The list is now frozen while merging, gated *both* by
+  `CanExecute` (so buttons grey out) *and* by an explicit guard in every mutator, because the drop and
+  drag gestures never reach a command at all.
+- **The data-loss bug:** the default output name is the constant `merged.mp4`, so merging twice aims
+  at the same path — and ffmpeg gets `-y`. A failed second merge **overwrote the first merge's good
+  video and then deleted the wreckage**, leaving the user with *neither* file. The concat now writes a
+  **sibling** (same directory, so `File.Move` is a free rename rather than a copy; same extension,
+  because ffmpeg picks its muxer from it), verifies *that*, and only moves a proven-whole merge into
+  place. Nothing the user already had is touched until we have something worth replacing it with.
+- **Also caught:** the override UI accepted **odd dimensions** (yuv420p's 2×2 chroma subsampling makes
+  libx264 reject them outright — `ToEven` guarded the *derived* path but the new per-field projections
+  reopened the hole); and the duration tolerance was a **flat 1 s**, where a false positive *deletes a
+  healthy merge* — it now scales with clip count, clamped to half the shortest clip so a genuinely
+  dropped clip is still caught.
+- **The recurring test lesson, twice more:** a test only pins an invariant if the fixture **varies
+  along the axis the invariant is about**. The filename tests only fed `holiday.mov`-shaped names —
+  every case where replacing the last dot-segment is *correct* — so they could not see that
+  `Path.ChangeExtension` was truncating `Trip 2026.07.11` to `Trip 2026.07.mp4`. And the dropped-clip
+  test used 5 s clips, where the clamped and unclamped tolerances give the same answer, so deleting the
+  clamp left all 596 tests green.
+- **Verified:** Release build **0/0**; **597/597** unit tests pass (`Category!=Integration`); and the
   merger is finally proven **end-to-end** by 3 trait-gated integration tests against the real bundled
   ffmpeg — three mismatched `testsrc` clips normalized and merged (**probing the output**, since the
   exit code is exactly what can't be trusted), the fast path proven to *never enter the normalize
   phase*, and a cancelled merge proven to strand no temp debris and no half-written output. Each task
-  was reviewed by an independent agent that mutation-tested the tests.
+  was reviewed by an independent agent that mutation-tested the tests, and every fix above is itself
+  mutation-proven.
 - **Not verified:** the page itself. This environment is headless and `FFMedia.Tests` doesn't reference
   the WinExe, so the XAML is checked by build + review only — **the layout, both drag gestures, and the
   dark-mode text rendering need the user's visual check.** (Dark-mode text has bitten this project twice;
