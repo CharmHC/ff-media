@@ -33,6 +33,42 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — M8 GIF Maker: design (spec only, no code)
+
+- **Done:** brainstormed and specced FFMedia's **third tool**, `FFMedia.Tools.GifMaker` →
+  `docs/superpowers/specs/2026-07-12-gif-maker-design.md`. One video → one GIF, with **start / end /
+  size / frame rate** and nothing else in v1. A **single-item editor with a live estimated size**, not a
+  queue: making a GIF is iterative — you tune until it is small enough — so the feedback loop matters
+  more than throughput.
+- **The decision that determines whether it looks good:** **always two-pass**
+  `palettegen` + `paletteuse`. The obvious `ffmpeg -i in.mp4 out.gif` quantizes to a *generic*
+  256-colour palette and produces visibly banded, dirty output; the two-pass route builds a palette from
+  the clip's **own** colours. Verified present in the bundled ffmpeg 8.1, and it costs ~3× of a fraction
+  of a second (**0.47 s vs 0.15 s** on a 3 s clip) — so the bad route is simply not offered.
+- **Measured, and it contradicted my own instinct:** two passes is **not automatically smaller**
+  (0.57 MB vs 0.38 MB in the same test) — the dithering that buys smooth gradients also adds noise that
+  compresses *worse*. Quality vs size is a real trade-off here, not a free win. v1 takes the quality
+  side; a dither preset is the first deferred follow-up.
+- **The spec's own claims, verified rather than asserted.** I had written that `-ss` before `-i` "seeks
+  to the nearest keyframe" and left `-to` unstated. Both are widely mis-stated and both were wrong/vague,
+  so I tested them: **`-to` is ABSOLUTE** on the source timeline, not a duration from the seek point
+  (`-ss 2 -to 5` → exactly **3.0 s**), and **input seeking is frame-accurate, not keyframe-snapped**
+  (30 frames at 10 fps, with keyframes 5 s apart). So the builder passes Start/End straight through and
+  needs no `-accurate_seek`. Corrected before the spec was committed.
+- **Reuses the rules the last two tools earned:** size and frame rate are **capped at the source** (the
+  `TargetBounds` rule — a GIF wider or faster than its source contains no new information); **height is
+  derived from the source aspect**, never a second box (the `1920 × 102` hole the merger shipped); the
+  finished GIF is **re-probed before being called a success** (ffmpeg's exit code is exactly what cannot
+  be trusted); size is estimated as a **range** calibrated from the user's own past GIFs (`gif-size.json`
+  — the `SpeedProfile` pattern for the same class of unknowable).
+- **Two promotions, because a tool must never reference another tool:** `Resolution` →
+  `FFMedia.Media`, `TrimParsing` → `FFMedia.Core`. Both pure moves.
+- **Verified:** `palettegen`/`paletteuse` exist in the bundled ffmpeg; `Gif24` **exists** in
+  `SymbolRegular` (checked — the shell degrades an unparseable icon name to `Apps24` *silently*); the
+  `-ss`/`-to` semantics above. No build/tests run — **documentation only, no code touched**.
+- **Next:** user reviews the spec → `writing-plans` for the implementation. SDD → **v0.23** (§17 gains
+  M8 + Changelog). Delivered via branch `docs/gif-maker-design` → PR.
+
 ### 2026-07-12 — Delta updates were never actually being built (four releases shipped full-only)
 
 - **The bug worth remembering — "the workflow passed" is not evidence the thing was produced.** SDD has
