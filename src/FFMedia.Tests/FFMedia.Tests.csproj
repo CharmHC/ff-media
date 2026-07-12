@@ -25,6 +25,7 @@
     <ProjectReference Include="..\FFMedia.Media\FFMedia.Media.csproj" />
     <ProjectReference Include="..\FFMedia.Tools.YouTubeDownloader\FFMedia.Tools.YouTubeDownloader.csproj" />
     <ProjectReference Include="..\FFMedia.Tools.VideoMerger\FFMedia.Tools.VideoMerger.csproj" />
+    <ProjectReference Include="..\FFMedia.Tools.GifMaker\FFMedia.Tools.GifMaker.csproj" />
   </ItemGroup>
 
   <!-- Bundled yt-dlp/ffmpeg binaries (fetched via build/fetch-binaries.ps1, git-ignored) for the

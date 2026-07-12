@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Matches the other tool modules at these exact versions — not new dependencies, just this
+         module needing the MVVM primitives for its ViewModels and the Fluent controls for its page. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FFMedia.Core\FFMedia.Core.csproj" />
+    <ProjectReference Include="..\FFMedia.Media\FFMedia.Media.csproj" />
+  </ItemGroup>
+
+</Project>
