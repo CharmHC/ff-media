@@ -100,6 +100,24 @@ public partial class MergerViewModel : ObservableObject
     /// — it is never shown.</summary>
     [ObservableProperty] private TargetBounds _bounds = TargetBounds.Empty;
 
+    /// <summary>Re-raised whenever <see cref="Bounds"/> is replaced, so the page's frame-rate
+    /// ComboBox (bound to <see cref="BoundedFrameRates"/>, a derived collection) refreshes too —
+    /// <c>[ObservableProperty]</c> only notifies for <c>Bounds</c> itself.</summary>
+    partial void OnBoundsChanged(TargetBounds value) => OnPropertyChanged(nameof(BoundedFrameRates));
+
+    /// <summary><see cref="Bounds"/>.<see cref="TargetBounds.FrameRates"/> wrapped as
+    /// <see cref="FrameRateOption"/> — the type <see cref="SelectedFrameRate"/> actually is. Binding
+    /// the ComboBox straight at <c>Bounds.FrameRates</c> (raw <see cref="FFMedia.Media.FrameRate"/>)
+    /// would desync silently: <c>DisplayMemberPath="Label"</c> has nothing to find on a bare
+    /// <see cref="FFMedia.Media.FrameRate"/>, so every row would render blank, and a two-way
+    /// <c>SelectedItem</c> binding would try to hand a <see cref="FFMedia.Media.FrameRate"/> to a
+    /// <see cref="FrameRateOption"/>-typed property — WPF swallows that as a failed binding, not an
+    /// exception, so the ComboBox would look interactive while every click did nothing. Because
+    /// <see cref="FrameRateOption"/> is a record, a freshly-wrapped instance still equality-matches
+    /// the one <see cref="SelectedFrameRate"/> returns, so selection highlighting keeps working even
+    /// though the two are different object instances.</summary>
+    public IEnumerable<FrameRateOption> BoundedFrameRates => Bounds.FrameRates.Select(rate => new FrameRateOption(rate));
+
     /// <summary>False with an empty clip list: there is no source to bound the output against, so the
     /// page disables the Output section (a merge needs two clips anyway).</summary>
     public bool HasClips => Clips.Count > 0;
