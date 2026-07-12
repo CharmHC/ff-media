@@ -11,7 +11,7 @@ public static class GifSizeEstimator
         ArgumentNullException.ThrowIfNull(profile);
 
         var pixelsPerFrame = (long)request.Size.Width * request.Size.Height;
-        var centre = pixelsPerFrame * request.FrameCount * profile.BytesPerPixelPerFrame;
+        var centre = pixelsPerFrame * request.FrameCount * profile.EffectiveBytesPerPixelPerFrame;
         var band = profile.Band;
 
         return new GifEstimate(

@@ -68,6 +68,46 @@ public class GifSizeEstimatorTests
     }
 
     [Fact]
+    public void Estimate_CentreMovesWithTheProfilesCalibration()
+    {
+        // This is the whole point of calibration: the estimate must actually use the profile's own
+        // learned value, not just narrow its range around a fixed seed. A mutant that hardcoded the
+        // seed constant in the estimator would still pass every other test here -- the range and
+        // scaling tests never vary BytesPerPixelPerFrame away from the seed, and the narrowing test
+        // asserts only on RELATIVE width, which is algebraically independent of the centre.
+        var fresh = new GifSizeProfile();
+        var heavy = new GifSizeProfile();
+        for (var i = 0; i < 8; i++)
+        {
+            // Far heavier than the seed (0.75) predicts for this request.
+            heavy.Record(actualBytes: 40_000_000, pixelsPerFrame: 480 * 270, frames: 90);
+        }
+
+        var freshEstimate = GifSizeEstimator.Estimate(Request(), fresh);
+        var heavyEstimate = GifSizeEstimator.Estimate(Request(), heavy);
+
+        Assert.True(heavyEstimate.LowBytes > freshEstimate.HighBytes,
+            "a profile calibrated on much heavier GIFs must produce a materially larger estimate");
+    }
+
+    [Fact]
+    public void Estimate_StaysARange_EvenAfterHeavyLearning()
+    {
+        // Past ~12 samples the band's floor (not its raw formula) is what keeps Low < High. Without
+        // the floor, a well-learned profile would invert the range.
+        var profile = new GifSizeProfile();
+        for (var i = 0; i < 30; i++)
+        {
+            profile.Record(actualBytes: 4_000_000, pixelsPerFrame: 480 * 270, frames: 90);
+        }
+
+        var estimate = GifSizeEstimator.Estimate(Request(), profile);
+
+        Assert.True(estimate.LowBytes < estimate.HighBytes,
+            "even heavily-learned, the estimate must stay a real range, never inverted");
+    }
+
+    [Fact]
     public void Estimate_NarrowsAsTheProfileLearns()
     {
         // With no evidence the range must be wide and honest. After the user has made several GIFs of
