@@ -19,7 +19,10 @@
          yet WPF's ScrollViewer marks mouse-wheel events HANDLED even when it cannot move. It therefore
          swallows every wheel tick and the shell's scroller, which does have room to scroll, never sees
          them: the page looked frozen everywhere except inside the clip list. -->
-    <StackPanel Margin="24" MaxWidth="900" HorizontalAlignment="Left">
+    <!-- IsSharedSizeScope: the clip-list header and every row are separate Grids, and Auto columns in
+         separate Grids size INDEPENDENTLY. The shared scope makes the columns carrying a matching
+         SharedSizeGroup negotiate one width, so the header cannot drift out of alignment with the rows. -->
+    <StackPanel Margin="24" MaxWidth="900" HorizontalAlignment="Left" Grid.IsSharedSizeScope="True">
 
             <TextBlock Text="Video Merger" FontSize="24" FontWeight="SemiBold" />
             <TextBlock Text="Add clips, put them in order, and join them into one video."
@@ -32,6 +35,30 @@
                 <TextBlock Text="…or drop video files anywhere on this page. Drag a row to reorder it."
                            VerticalAlignment="Center" Margin="12,0,0,0" Opacity="0.7" />
             </StackPanel>
+
+            <!-- Column headers. Grid.IsSharedSizeScope (on the page's root StackPanel) is what makes
+                 these line up with the rows: two separate Grids with Auto columns size INDEPENDENTLY,
+                 so without a shared scope the header would drift out of alignment as file names change.
+                 Each Auto column here and in the row template below carries the same SharedSizeGroup,
+                 so they negotiate one width. -->
+            <Grid Margin="12,0,12,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" SharedSizeGroup="PinColumn" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" SharedSizeGroup="StatusColumn" />
+                    <ColumnDefinition Width="Auto" SharedSizeGroup="ActionsColumn" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="Pin" FontSize="12" FontWeight="SemiBold" Opacity="0.7"
+                           Margin="0,0,12,0"
+                           ToolTip="Pinned clips keep their position when you Shuffle. Every clip is merged, pinned or not." />
+                <TextBlock Grid.Column="1" Text="Clip" FontSize="12" FontWeight="SemiBold" Opacity="0.7" />
+                <TextBlock Grid.Column="2" Text="Status" FontSize="12" FontWeight="SemiBold" Opacity="0.7"
+                           Margin="8,0" HorizontalAlignment="Center"
+                           ToolTip="Whether the clip already matches the output target, or must be re-encoded to match it." />
+                <TextBlock Grid.Column="3" Text="Actions" FontSize="12" FontWeight="SemiBold" Opacity="0.7"
+                           HorizontalAlignment="Center" />
+            </Grid>
 
             <!-- ui:ListView, NOT the plain WPF ListView: WPF-UI's ControlsDictionary keys its implicit
                  styles to its OWN subclasses (Wpf.Ui.Controls.ListView / ListViewItem) and ships no
@@ -60,15 +87,22 @@
                     <DataTemplate>
                         <Grid Margin="0,4">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="PinColumn" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="StatusColumn" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="ActionsColumn" />
                             </Grid.ColumnDefinitions>
 
-                            <CheckBox Grid.Column="0" IsChecked="{Binding IsLocked}"
-                                      VerticalAlignment="Center" Margin="0,0,12,0"
-                                      ToolTip="Lock this clip to its position when shuffling" />
+                            <!-- A PIN, not a checkbox. A checkbox in a list means "include this row" in
+                                 every UI the user has ever met — and they read it that way here, thinking
+                                 it chose which clips to merge. It never did: it only exempts the row from
+                                 Shuffle. Every clip in the list is merged, pinned or not. -->
+                            <ToggleButton Grid.Column="0" IsChecked="{Binding IsLocked}"
+                                          VerticalAlignment="Center" Margin="0,0,12,0"
+                                          Padding="6" Background="Transparent" BorderThickness="0"
+                                          ToolTip="{Binding PinTooltip}">
+                                <ui:SymbolIcon x:Name="PinIcon" Symbol="PinOff24" FontSize="16" Opacity="0.5" />
+                            </ToggleButton>
 
                             <StackPanel Grid.Column="1">
                                 <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"
@@ -99,6 +133,17 @@
                                            CommandParameter="{Binding}" />
                             </StackPanel>
                         </Grid>
+
+                        <!-- Swap the pin glyph on the named element rather than through a Style: a Style
+                             with a TargetType and no BasedOn silently discards WPF-UI's implicit one, and
+                             a BasedOn pointing at a key WPF-UI does not register throws XamlParseException
+                             at page LOAD — both have already shipped from this very page (SDD §13). -->
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsLocked}" Value="True">
+                                <Setter TargetName="PinIcon" Property="Symbol" Value="Pin24" />
+                                <Setter TargetName="PinIcon" Property="Opacity" Value="1" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
                     </DataTemplate>
                 </ui:ListView.ItemTemplate>
             </ui:ListView>
@@ -106,7 +151,7 @@
             <!-- 2. Order -->
             <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
                 <ui:Button Content="Shuffle" Icon="{ui:SymbolIcon ArrowShuffle24}"
-                           ToolTip="Randomize the order, leaving locked clips where they are"
+                           ToolTip="Randomize the order, leaving pinned clips in place"
                            Command="{Binding ShuffleCommand}" />
                 <ui:Button Content="Clear all" Icon="{ui:SymbolIcon Dismiss24}" Margin="8,0,0,0"
                            ToolTip="Remove every clip from the list"

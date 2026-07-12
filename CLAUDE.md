@@ -33,6 +33,39 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — Merger clip list: column headers, and the checkbox that lied
+
+- **The bug worth remembering — an affordance is a promise.** The per-clip control was a **`CheckBox`**,
+  and a checkbox in a list means *"include this row"* in every UI anyone has ever used. The user
+  reasonably concluded it chose **which clips get merged**. It never did — it only exempts a row from
+  **Shuffle**, and every clip in the list is merged whether ticked or not. No tooltip rescues a control
+  whose *shape* says the wrong thing. It is now a **pin `ToggleButton`** (`PinOff24` → `Pin24`), and
+  `MergeClipViewModel.PinTooltip` states the one thing it affects ("…Shuffle won't move it. It is merged
+  either way.") and names the pinned position **1-based** for a human. Shuffle's tooltip: "locked" →
+  "pinned". **Code names (`IsLocked`/`LockedIndex`/`SetLock`) deliberately unchanged** — internal, and
+  renaming them churns ~30 tests without changing anything the user sees. SDD §13 gains the rule.
+- **Column headers (Pin · Clip · Status · Actions).** The conformance badge especially read as an
+  unexplained chip. The load-bearing detail is the alignment: **`Auto` columns in *separate* Grids size
+  independently**, so a header Grid naively placed above the rows drifts out of alignment as file names
+  change. `Grid.IsSharedSizeScope` on the page root + a matching `SharedSizeGroup` on each `Auto` column
+  in *both* the header and the row template makes them negotiate one width.
+- **The XAML trap avoided (twice-shipped from this exact page).** The glyph swap is a
+  `DataTemplate.Trigger` on a named element — **not** a `Style`. A `Style` with a `TargetType` and no
+  `BasedOn` silently discards WPF-UI's implicit style; a `BasedOn` pointing at a key WPF-UI does not
+  register throws `XamlParseException` at page **load** (compiles clean, passes every parse-only test,
+  crashes in front of the user). Both have happened here. `Pin24`/`PinOff24` were **verified to exist**
+  in `SymbolRegular` before being written into the XAML.
+- **A dead trigger is invisible** to the compiler *and* to the parse-only page-load test — the toggle
+  would simply look permanently unpinned however often it was clicked. So `MergerPageLoadTests` gained a
+  test that **realizes the row in a real visual tree and reads the glyph back**. Mutation-proven:
+  deleting the `Setter` fails it and nothing else.
+- **Verified:** Release build **0 warnings / 0 errors**; **640/640** unit tests; **4/4** merge
+  integration tests against the real bundled ffmpeg. **Not verified:** a human has not seen the header
+  alignment or the pin on screen — `IsSharedSizeScope` alignment in particular is a *pixel* claim that
+  only a screenshot settles.
+- **Next:** user reviews the PR and clicks through. SDD → **v0.19** (§13 + Changelog). Delivered via
+  branch `feat/merger-clip-list-header` → PR.
+
 ### 2026-07-12 — Merger: `TargetBounds` implemented + proven against real ffmpeg
 
 - **Done:** implemented the design from the same-day "design only" entry below. New pure
