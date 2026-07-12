@@ -13,7 +13,7 @@ public static class MergeTargetDerivation
     /// (24000/1001, 30000/1001, 60000/1001) sit alongside their integer look-alikes (24, 30, 60)
     /// because both can legitimately be the closest match — <see cref="Snap"/> picks whichever
     /// candidate is numerically closest, so list order here is not significant.</summary>
-    private static readonly FrameRate[] StandardRates =
+    public static IReadOnlyList<FrameRate> StandardRates { get; } =
     [
         new(24000, 1001), new(24, 1), new(25, 1), new(30000, 1001),
         new(30, 1), new(50, 1), new(60000, 1001), new(60, 1),
