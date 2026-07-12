@@ -1,0 +1,185 @@
+<Page x:Class="FFMedia.Tools.VideoMerger.Views.MergerPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      AllowDrop="True"
+      DragOver="OnDragOverPage"
+      Drop="OnFilesDropped"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+    <!-- The Foreground above is load-bearing (SDD §13): WPF's Frame isolates property-value
+         inheritance, so the window's foreground never reaches page content and every plain TextBlock
+         here would fall back to WPF's default BLACK — invisible in dark mode. -->
+    <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Page.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24" MaxWidth="900" HorizontalAlignment="Left">
+
+            <TextBlock Text="Video Merger" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Text="Add clips, put them in order, and join them into one video."
+                       Opacity="0.8" Margin="0,4,0,16" />
+
+            <!-- 1. Clips -->
+            <TextBlock Text="Clips" FontSize="16" FontWeight="SemiBold" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
+                <ui:Button Content="Add clips…" Icon="{ui:SymbolIcon Add24}" Click="OnPickClips" />
+                <TextBlock Text="…or drop video files anywhere on this page. Drag a row to reorder it."
+                           VerticalAlignment="Center" Margin="12,0,0,0" Opacity="0.7" />
+            </StackPanel>
+
+            <ListView x:Name="ClipList" ItemsSource="{Binding Clips}" MinHeight="120" MaxHeight="340"
+                      Margin="0,0,0,12" AllowDrop="True"
+                      PreviewMouseLeftButtonDown="OnClipMouseDown"
+                      MouseMove="OnClipMouseMove"
+                      DragOver="OnClipDragOver"
+                      Drop="OnClipDropped">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <CheckBox Grid.Column="0" IsChecked="{Binding IsLocked}"
+                                      VerticalAlignment="Center" Margin="0,0,12,0"
+                                      ToolTip="Lock this clip to its position when shuffling" />
+
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Details}" Opacity="0.7" FontSize="12" />
+                                <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="4"
+                                             Margin="0,4,0,0"
+                                             Visibility="{Binding ShowProgressBar, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock Text="{Binding ProgressText}" Opacity="0.6" FontSize="12"
+                                           Margin="0,2,0,0" />
+                            </StackPanel>
+
+                            <Border Grid.Column="2" Padding="8,2" CornerRadius="4" Margin="8,0"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                <TextBlock Text="{Binding Badge}" ToolTip="{Binding BadgeTooltip}" FontSize="12" />
+                            </Border>
+
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:Button Icon="{ui:SymbolIcon ChevronUp24}" ToolTip="Move up" Margin="0,0,4,0"
+                                           Command="{Binding DataContext.MoveUpCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                                <ui:Button Icon="{ui:SymbolIcon ChevronDown24}" ToolTip="Move down" Margin="0,0,4,0"
+                                           Command="{Binding DataContext.MoveDownCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                                <ui:Button Icon="{ui:SymbolIcon Delete24}" ToolTip="Remove"
+                                           Command="{Binding DataContext.RemoveClipCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <!-- 2. Order -->
+            <ui:Button Content="Shuffle" Icon="{ui:SymbolIcon ArrowShuffle24}"
+                       ToolTip="Randomize the order, leaving locked clips where they are"
+                       Command="{Binding ShuffleCommand}" Margin="0,0,0,20" />
+
+            <!-- 3. Output — the derived target, every field overridable -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Text="(you have overridden the derived target)" Opacity="0.7" FontSize="12"
+                           VerticalAlignment="Center" Margin="8,0,0,0"
+                           Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
+                <ui:Button Content="Reset to derived" Icon="{ui:SymbolIcon ArrowReset24}" Margin="8,0,0,0"
+                           Command="{Binding ResetTargetToDerivedCommand}"
+                           Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
+            </StackPanel>
+
+            <UniformGrid Columns="4" Margin="0,0,0,8">
+                <StackPanel Margin="0,0,8,8">
+                    <TextBlock Text="Width" />
+                    <ui:TextBox Text="{Binding TargetWidth, UpdateSourceTrigger=LostFocus}" />
+                </StackPanel>
+                <StackPanel Margin="0,0,8,8">
+                    <TextBlock Text="Height" />
+                    <ui:TextBox Text="{Binding TargetHeight, UpdateSourceTrigger=LostFocus}" />
+                </StackPanel>
+                <StackPanel Margin="0,0,8,8">
+                    <TextBlock Text="Frame rate" />
+                    <ComboBox ItemsSource="{Binding FrameRates}" SelectedItem="{Binding SelectedFrameRate}"
+                              DisplayMemberPath="Label" />
+                </StackPanel>
+                <StackPanel Margin="0,0,0,8">
+                    <TextBlock Text="Container" />
+                    <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}"
+                              ToolTip="Also sets the output file's extension — ffmpeg picks its muxer from that" />
+                </StackPanel>
+            </UniformGrid>
+
+            <UniformGrid Columns="4" Margin="0,0,0,8">
+                <StackPanel Margin="0,0,8,8">
+                    <TextBlock Text="Video codec" />
+                    <ComboBox ItemsSource="{Binding VideoCodecs}" SelectedItem="{Binding SelectedVideoCodec}" />
+                </StackPanel>
+                <StackPanel Margin="0,0,8,8">
+                    <TextBlock Text="CRF (quality, 0–51)" />
+                    <ui:TextBox Text="{Binding TargetCrf, UpdateSourceTrigger=LostFocus}" />
+                </StackPanel>
+                <StackPanel Margin="0,0,8,8">
+                    <TextBlock Text="Audio codec" />
+                    <ComboBox ItemsSource="{Binding AudioCodecs}" SelectedItem="{Binding SelectedAudioCodec}" />
+                </StackPanel>
+                <StackPanel Margin="0,0,0,8">
+                    <TextBlock Text="Fit mode" />
+                    <ComboBox ItemsSource="{Binding FitModes}" SelectedItem="{Binding SelectedFitMode}"
+                              ToolTip="How a clip whose aspect differs from the target is fitted into it" />
+                </StackPanel>
+            </UniformGrid>
+
+            <UniformGrid Columns="4" Margin="0,0,0,8">
+                <StackPanel Margin="0,0,8,8">
+                    <TextBlock Text="Audio sample rate" />
+                    <ui:TextBox Text="{Binding TargetAudioSampleRate, UpdateSourceTrigger=LostFocus}" />
+                </StackPanel>
+                <StackPanel Margin="0,0,8,8">
+                    <TextBlock Text="Audio channels" />
+                    <ui:TextBox Text="{Binding TargetAudioChannels, UpdateSourceTrigger=LostFocus}" />
+                </StackPanel>
+            </UniformGrid>
+
+            <TextBlock Text="File name" />
+            <ui:TextBox Text="{Binding OutputFileName, UpdateSourceTrigger=LostFocus}" Margin="0,0,0,8" />
+
+            <TextBlock Text="Folder" />
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ui:TextBox Grid.Column="0" Text="{Binding OutputFolder, UpdateSourceTrigger=LostFocus}" />
+                <ui:Button Grid.Column="1" Content="Browse…" Icon="{ui:SymbolIcon FolderOpen24}"
+                           Margin="8,0,0,0" Click="OnPickFolder" />
+            </Grid>
+
+            <!-- 4. Summary -->
+            <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" Margin="0,0,0,12" TextWrapping="Wrap" />
+
+            <!-- 5. Actions -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <ui:Button Content="Merge" Appearance="Primary" Icon="{ui:SymbolIcon VideoClipMultiple24}"
+                           Command="{Binding MergeCommand}" Margin="0,0,8,0" />
+                <ui:Button Content="Cancel" Command="{Binding CancelCommand}" />
+            </StackPanel>
+            <ProgressBar Value="{Binding OverallPercent, Mode=OneWay}" Maximum="100" Height="6" />
+            <TextBlock Text="{Binding StatusMessage}" Opacity="0.8" Margin="0,6,0,0" TextWrapping="Wrap" />
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>

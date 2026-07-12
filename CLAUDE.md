@@ -33,6 +33,82 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — M7 PR 2: Video Merger UI — **M7 complete**
+
+- **Done:** the merger's UI module — `MergeClipViewModel` + `MergerViewModel` (headless, every
+  dependency an interface, unit-tested with fakes), `MergerPage`, `VideoMergerTool : ITool`, and
+  `AddVideoMerger()`. **The shell was not modified**: the tool registers `ITool`/`IToolPage` and the
+  shell discovers it — which is the entire point of the modular seam, and M7's real purpose was to
+  prove that seam holds for a second tool. It does. The page has the clip list (drag files in to add,
+  drag rows to reorder, Move Up/Down, lock-to-index, remove), Shuffle honoring locks, the
+  auto-derived-but-fully-overridable target, the §6.5 summary line, per-clip + overall progress, and
+  Merge/Cancel, wired to history and notifications.
+- **Four engine changes deliberately reopened** (PR 1 was merged; these were worth the churn):
+  1. **Per-clip progress** (user-chosen) — `MergeProgress` gained `ClipPercents`. A **conforming clip
+     reads 100 from the first report**: it has no encoding work, and showing it as pending would be a lie.
+  2. **`HistoryEntry.Source`** (user-chosen) — a merge is now a first-class history row rather than a
+     download with a blank URL. Old `history.json` files still load through a tolerant converter:
+     unknown name, null, or a number all degrade to `Download`. **Degrade the field, never destroy the file.**
+  3. **`MergeService` now verifies its own output.** See below — this was the serious one.
+  4. **Container ↔ file extension reconciled.** `ConcatArgsBuilder` emits no `-f`, so **ffmpeg picks
+     its muxer from the output file's extension**, while `Target.Container` only gated
+     `-movflags +faststart`. A derived **MKV** target therefore wrote a real **MP4** named `.mp4` —
+     the user picked MKV and got MP4. The two are now kept in lockstep both ways.
+- **The bug worth remembering:** ffmpeg's `concat` demuxer does **not** fail on a segment it cannot
+  open. It **drops that segment and every one after it, and exits 0**. So `MergeService` as shipped in
+  PR 1 would report a successful merge and hand the user a **silently truncated video** — and this is
+  trivially reachable on the **fast path**, where the concat list holds the user's *own* file paths
+  (a clip moved, renamed, or on a disconnected drive between adding it and clicking Merge). Fixed with
+  an open-every-segment preflight **+** a post-merge duration check against the expected total **+**
+  deleting the misleading partial output. `-xerror` is **not** the fix — it fails healthy merges.
+- **Decisions:** `SortOrder = 20`, not the spec's `2` — ordering is *ascending* and the downloader is
+  `10`, so `2` would sort the merger *above* it, inverting the spec's own intent. **No `IErrorMapper`**
+  (spec §8 cites one; it has never existed here) — `MergeErrors`, a static per-module mapper matching
+  `YtDlpErrors`, instead. `IconGlyph = "VideoClipMultiple24"`, pinned by a test that parses it back to
+  a real `SymbolRegular`, because the shell falls back to `Apps24` on an unparseable name and a typo
+  would degrade **silently**.
+- **The composition bug — and why the final whole-branch review exists.** Every task passed its own
+  review; the *whole* was still broken. **The clip list stayed editable during a merge.** Task 5 built
+  the list commands, Task 7's threading argument *assumed the list was frozen* (it says so in a
+  comment), and Task 8 added a drag gesture that bypasses commands entirely. Nobody was wrong — the
+  composition was. Reordering mid-merge puts clip M's progress on row N (`ClipPercents` is indexed by
+  the request snapshot taken at click time); a removed clip is still in the output; and worst,
+  `OnMergeProgress` runs on **ffmpeg's stdout callback thread** and indexes `Clips`, so a concurrent
+  UI-thread mutation throws inside a `Process.OutputDataReceived` handler — which has **no catch
+  anywhere up the stack**, taking the app down. The list is now frozen while merging, gated *both* by
+  `CanExecute` (so buttons grey out) *and* by an explicit guard in every mutator, because the drop and
+  drag gestures never reach a command at all.
+- **The data-loss bug:** the default output name is the constant `merged.mp4`, so merging twice aims
+  at the same path — and ffmpeg gets `-y`. A failed second merge **overwrote the first merge's good
+  video and then deleted the wreckage**, leaving the user with *neither* file. The concat now writes a
+  **sibling** (same directory, so `File.Move` is a free rename rather than a copy; same extension,
+  because ffmpeg picks its muxer from it), verifies *that*, and only moves a proven-whole merge into
+  place. Nothing the user already had is touched until we have something worth replacing it with.
+- **Also caught:** the override UI accepted **odd dimensions** (yuv420p's 2×2 chroma subsampling makes
+  libx264 reject them outright — `ToEven` guarded the *derived* path but the new per-field projections
+  reopened the hole); and the duration tolerance was a **flat 1 s**, where a false positive *deletes a
+  healthy merge* — it now scales with clip count, clamped to half the shortest clip so a genuinely
+  dropped clip is still caught.
+- **The recurring test lesson, twice more:** a test only pins an invariant if the fixture **varies
+  along the axis the invariant is about**. The filename tests only fed `holiday.mov`-shaped names —
+  every case where replacing the last dot-segment is *correct* — so they could not see that
+  `Path.ChangeExtension` was truncating `Trip 2026.07.11` to `Trip 2026.07.mp4`. And the dropped-clip
+  test used 5 s clips, where the clamped and unclamped tolerances give the same answer, so deleting the
+  clamp left all 596 tests green.
+- **Verified:** Release build **0/0**; **597/597** unit tests pass (`Category!=Integration`); and the
+  merger is finally proven **end-to-end** by 3 trait-gated integration tests against the real bundled
+  ffmpeg — three mismatched `testsrc` clips normalized and merged (**probing the output**, since the
+  exit code is exactly what can't be trusted), the fast path proven to *never enter the normalize
+  phase*, and a cancelled merge proven to strand no temp debris and no half-written output. Each task
+  was reviewed by an independent agent that mutation-tested the tests, and every fix above is itself
+  mutation-proven.
+- **Not verified:** the page itself. This environment is headless and `FFMedia.Tests` doesn't reference
+  the WinExe, so the XAML is checked by build + review only — **the layout, both drag gestures, and the
+  dark-mode text rendering need the user's visual check.** (Dark-mode text has bitten this project twice;
+  the page root sets `Foreground` per SDD §13, but that's an argument, not a screenshot.)
+- **Next:** user reviews and merges the PR, then does a headed click-through of the merger page.
+  SDD → **v0.15**, M7 ✅ complete. Delivered via branch `feat/m7-merger-ui` → PR.
+
 ### 2026-07-11 — M7 PR 1: Video Merger engine (no UI)
 
 - **Done:** realized `FFMedia.Media` — `IMediaAnalyzer`/`FfprobeMediaAnalyzer` over ffprobe,

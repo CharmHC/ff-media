@@ -1,16 +1,21 @@
 using System.IO;
 using FFMedia.Core.Binaries;
 using FFMedia.Core.Processes;
+using FFMedia.Core.Tools;
 using FFMedia.Media;
+using FFMedia.Tools.VideoMerger.Navigation;
 using FFMedia.Tools.VideoMerger.Services;
+using FFMedia.Tools.VideoMerger.ViewModels;
+using FFMedia.Tools.VideoMerger.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace FFMedia.Tools.VideoMerger;
 
-/// <summary>Registers the Video Merger engine. The <c>ITool</c>/<c>IToolPage</c> registration lands
-/// with the UI in PR 2 — the module has no page yet, and the shell must not try to navigate to one.</summary>
+/// <summary>Registers the Video Merger. <see cref="AddVideoMergerEngine"/> is the headless engine and
+/// registers no <c>ITool</c> — a host that wants the tool in its navigation pane also calls
+/// <see cref="AddVideoMerger"/>.</summary>
 public static class ServiceCollectionExtensions
 {
     /// <param name="services">The app's service collection. Must already have <c>AddFFMediaCore</c>
@@ -40,7 +45,29 @@ public static class ServiceCollectionExtensions
             GetFreeBytes,
             tempRoot,
             maxConcurrency,
-            sp.GetService<ILogger<MergeService>>() ?? NullLogger<MergeService>.Instance));
+            sp.GetService<ILogger<MergeService>>() ?? NullLogger<MergeService>.Instance,
+            // Proves the finished file is whole: ffmpeg's concat exits 0 even when it silently
+            // drops a segment, so the output's own duration is the only trustworthy evidence.
+            sp.GetRequiredService<IMediaAnalyzer>()));
+
+        return services;
+    }
+
+    /// <summary>Registers the Video Merger's UI: the tool metadata, the page the shell navigates to,
+    /// and the page's ViewModel. The shell discovers both through <c>ITool</c>/<c>IToolPage</c> and is
+    /// not modified.</summary>
+    /// <remarks>Call <see cref="AddVideoMergerEngine"/> first — the ViewModel resolves
+    /// <see cref="IMergeService"/>, <see cref="IMediaAnalyzer"/> and <see cref="ISpeedProfileStore"/>
+    /// from it — and note that it also needs an <c>INotificationService</c>, which is realized in the
+    /// App layer (the snackbar), not in Core.</remarks>
+    public static IServiceCollection AddVideoMerger(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton<ITool, VideoMergerTool>();
+        services.AddSingleton<IToolPage>(new ToolPage("video-merger", typeof(MergerPage)));
+        services.AddTransient<MergerViewModel>();
+        services.AddTransient<MergerPage>();
 
         return services;
     }

@@ -33,14 +33,19 @@ public sealed class MergeService : IMergeService
     private readonly string _tempRoot;
     private readonly int _maxConcurrency;
     private readonly ILogger<MergeService> _logger;
+    private readonly IMediaAnalyzer? _verifier;
 
+    /// <param name="verifier">Probes the finished file to prove the merge is whole. Optional (the
+    /// same trailing-optional shape <c>DownloadManager</c> uses for its sinks): when absent, only
+    /// the cheaper unreadable-segment preflight guards against a silently truncated output.</param>
     public MergeService(
         IFfmpegRunner ffmpeg,
         ISpeedProfileStore speedStore,
         Func<string, long> getFreeBytes,
         string tempRoot,
         int maxConcurrency,
-        ILogger<MergeService> logger)
+        ILogger<MergeService> logger,
+        IMediaAnalyzer? verifier = null)
     {
         ArgumentNullException.ThrowIfNull(ffmpeg);
         ArgumentNullException.ThrowIfNull(speedStore);
@@ -55,6 +60,115 @@ public sealed class MergeService : IMergeService
         _tempRoot = tempRoot;
         _maxConcurrency = maxConcurrency;
         _logger = logger;
+        _verifier = verifier;
+    }
+
+    /// <summary>The first segment we cannot actually open for reading, or null if all are fine.
+    /// Opening is the test, not <see cref="File.Exists"/>: a clip whose ACL denies us read still
+    /// "exists", and ffmpeg would drop it just the same.</summary>
+    private static string? FirstUnreadableSegment(IEnumerable<string> segments)
+    {
+        foreach (var segment in segments)
+        {
+            try
+            {
+                using var stream = File.OpenRead(segment);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                return segment;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>How much shorter than the sum of its clips the output may legitimately be.</summary>
+    /// <remarks><para>A fixed 1 s was too blunt in the direction that costs the user a file. Every clip
+    /// contributes a little rounding of its own (the container's duration versus the stream the
+    /// normalize pass actually writes, a trailing partial frame, a VFR source), and those errors
+    /// ACCUMULATE — so a healthy 40-clip merge could land more than a second short, be declared
+    /// truncated, and have its perfectly good output deleted. A false positive here is not a warning,
+    /// it is data loss.</para>
+    /// <para>It cannot simply grow without bound, though, or a genuinely dropped clip stops being
+    /// detectable — which is the whole reason this check exists. So it is also clamped to half the
+    /// SHORTEST clip: whatever else we forgive, losing an entire clip still moves the duration by more
+    /// than the tolerance.</para></remarks>
+    private static TimeSpan ToleranceFor(IReadOnlyList<MergeClip> clips)
+    {
+        var accumulated = TimeSpan.FromSeconds(1 + (0.05 * clips.Count));
+
+        var shortest = clips.Min(c => c.Info.Duration);
+        var half = shortest > TimeSpan.Zero ? shortest / 2 : accumulated;
+
+        return accumulated < half ? accumulated : half;
+    }
+
+    /// <summary>Proves the output really contains every clip. ffmpeg's concat demuxer exits 0 even
+    /// when it silently drops a segment it cannot decode, so a short output is the only signal that
+    /// this happened — and shipping a truncated video the user believes is complete is the worst
+    /// thing this tool could do.</summary>
+    private async Task<Result> VerifyOutputAsync(
+        string outputPath, TimeSpan expected, IReadOnlyList<MergeClip> clips, CancellationToken ct)
+    {
+        if (_verifier is null || expected <= TimeSpan.Zero)
+        {
+            return Result.Success();
+        }
+
+        var probe = await _verifier.AnalyzeAsync(outputPath, ct).ConfigureAwait(false);
+        if (!probe.IsSuccess)
+        {
+            // We cannot read back what we just wrote. Say so rather than claim success.
+            return Result.Failure($"The merged file could not be read back: {probe.Error}");
+        }
+
+        var actual = probe.Value!.Duration;
+        if (actual >= expected - ToleranceFor(clips))
+        {
+            return Result.Success();
+        }
+
+        return Result.Failure(
+            $"The merge finished but the result is {Format(actual)} instead of {Format(expected)} — "
+            + "at least one clip was dropped, most likely because it is corrupt or unreadable. "
+            + "The incomplete file has been discarded.");
+
+        static string Format(TimeSpan span)
+            => span.ToString(span.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Where the concat writes while it is still unproven: a sibling of the destination,
+    /// keeping the real extension because ffmpeg picks its muxer from it.</summary>
+    private static string PartialPathFor(string outputPath)
+    {
+        var directory = Path.GetDirectoryName(outputPath) ?? string.Empty;
+        var name = Path.GetFileNameWithoutExtension(outputPath);
+        var extension = Path.GetExtension(outputPath);
+
+        return Path.Combine(directory, $"{name}.merging-{Guid.NewGuid():N}{extension}");
+    }
+
+    /// <summary>Removes the unproven merge. Always safe: this file is one we created moments ago and
+    /// nothing else can be at that path — it carries a fresh GUID.</summary>
+    private void TryDeletePendingOutput(string? pendingOutput)
+    {
+        if (pendingOutput is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(pendingOutput))
+            {
+                File.Delete(pendingOutput);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not remove the incomplete merge output at {Path}.", pendingOutput);
+        }
     }
 
     public async Task<Result<string>> MergeAsync(
@@ -70,12 +184,21 @@ public sealed class MergeService : IMergeService
 
         var workingDirectory = Path.Combine(_tempRoot, "merge-" + Guid.NewGuid().ToString("N"));
 
+        // The half-written merge, next to its destination but not yet in it. Non-null exactly while a
+        // file exists that is ours to clean up; nulled the instant it is moved into place.
+        string? pendingOutput = null;
+
         // The bar is built before the tracker so the fast path can hand the whole 100 points to the
         // concat rather than pretend a normalize phase that never happens got us to 95 %.
         var plan = Plan(request);
         var tracker = new ProgressTracker(
             progress,
             [.. plan.Work.Select(w => w.Clip.Info.Duration.TotalSeconds)],
+            // Work[slot].Index IS the clip's position in request.Clips, which is exactly the mapping
+            // the per-clip bars need: _fractions is indexed by normalize SLOT, the published array by
+            // CLIP. Publishing by slot would attribute one clip's progress to another.
+            [.. plan.Work.Select(w => w.Index)],
+            request.Clips.Count,
             plan.Work.Count == 0 ? 0 : EncodeWeight);
 
         try
@@ -113,10 +236,37 @@ public sealed class MergeService : IMergeService
 
             var listPath = Path.Combine(workingDirectory, "list.txt");
             var segments = plan.Segments.Select(s => s!).ToList();
+
+            // ffmpeg's concat demuxer does NOT fail on a segment it cannot open: it prints
+            // "Impossible to open", drops that segment AND EVERY SEGMENT AFTER IT, and exits 0. We
+            // would report a completed merge and hand the user a silently truncated video. This is
+            // reachable without doing anything strange — on the fast path the list holds the user's
+            // OWN file paths, so moving or deleting a clip between adding it and clicking Merge is
+            // enough. Refuse the merge instead, and name the clip.
+            var unreadable = FirstUnreadableSegment(segments);
+            if (unreadable is not null)
+            {
+                tracker.ReportTerminal(MergeJobStatus.Failed);
+                return Result<string>.Failure(
+                    $"'{Path.GetFileName(unreadable)}' can no longer be read — it may have been moved, "
+                    + "renamed, or deleted since it was added. Remove it from the list, or put it back.");
+            }
+
             await File.WriteAllTextAsync(listPath, ConcatArgsBuilder.BuildListFile(segments), ct)
                 .ConfigureAwait(false);
 
             EnsureOutputDirectory(request.OutputPath);
+
+            // ffmpeg is given -y and would overwrite the destination the moment the concat starts. So
+            // it never writes the destination: it writes a SIBLING, we verify that, and only a merge
+            // that passed verification is moved into place. Until then the file already sitting there
+            // — very likely the previous merge, since the default output name is a constant — is
+            // untouched. A failed merge must not cost the user the good video they already had.
+            //
+            // The sibling lives in the OUTPUT directory, not the temp root: File.Move within a volume
+            // is a rename (free), while moving across volumes would copy the whole merged file. And it
+            // keeps the real extension, because ffmpeg picks its muxer from it.
+            pendingOutput = PartialPathFor(request.OutputPath);
 
             var outputSeconds = plan.OutputDuration.TotalSeconds;
             var concatSink = new SyncProgress<FfmpegProgress>(p =>
@@ -124,7 +274,7 @@ public sealed class MergeService : IMergeService
 
             var concat = await _ffmpeg
                 .RunAsync(
-                    ConcatArgsBuilder.BuildArgs(listPath, request.OutputPath, request.Target.Container),
+                    ConcatArgsBuilder.BuildArgs(listPath, pendingOutput, request.Target.Container),
                     concatSink,
                     ct)
                 .ConfigureAwait(false);
@@ -134,6 +284,21 @@ public sealed class MergeService : IMergeService
                 tracker.ReportTerminal(MergeJobStatus.Failed);
                 return Result<string>.Failure(concat.Error!);
             }
+
+            // Exit 0 is not proof of a whole merge. The demuxer drops a segment it cannot decode and
+            // still succeeds, so the only trustworthy evidence is the output itself: if it is
+            // materially shorter than the clips we put in, something was silently dropped.
+            var verified = await VerifyOutputAsync(pendingOutput, plan.OutputDuration, request.Clips, ct)
+                .ConfigureAwait(false);
+            if (!verified.IsSuccess)
+            {
+                tracker.ReportTerminal(MergeJobStatus.Failed);
+                return Result<string>.Failure(verified.Error!);
+            }
+
+            // Verified whole. NOW it may take the destination.
+            File.Move(pendingOutput, request.OutputPath, overwrite: true);
+            pendingOutput = null;
 
             tracker.ReportTerminal(MergeJobStatus.Completed);
             return Result<string>.Success(request.OutputPath);
@@ -153,6 +318,11 @@ public sealed class MergeService : IMergeService
         }
         finally
         {
+            // Every exit path: failed, canceled, or thrown. An unproven merge left lying next to the
+            // real one would be indistinguishable from a finished video — which is the whole thing we
+            // are trying not to hand the user. (On success it is already null: it was moved into
+            // place.)
+            TryDeletePendingOutput(pendingOutput);
             TryCleanup(workingDirectory);
         }
     }
@@ -435,14 +605,27 @@ public sealed class MergeService : IMergeService
         private readonly IProgress<MergeProgress>? _sink;
         private readonly double[] _fractions;
         private readonly double[] _weights;
+
+        /// <summary>Normalize slot → the clip's index in <c>MergeRequest.Clips</c>. Only the clips
+        /// that need re-encoding have a slot at all.</summary>
+        private readonly int[] _slotToClipIndex;
+
+        private readonly int _clipCount;
         private readonly double _encodeWeight;
         private readonly Lock _gate = new();
         private double _highWater;
 
-        public ProgressTracker(IProgress<MergeProgress>? sink, double[] clipSeconds, double encodeWeight)
+        public ProgressTracker(
+            IProgress<MergeProgress>? sink,
+            double[] clipSeconds,
+            int[] slotToClipIndex,
+            int clipCount,
+            double encodeWeight)
         {
             _sink = sink;
             _encodeWeight = encodeWeight;
+            _slotToClipIndex = slotToClipIndex;
+            _clipCount = clipCount;
             _fractions = new double[clipSeconds.Length];
             _weights = new double[clipSeconds.Length];
 
@@ -516,6 +699,22 @@ public sealed class MergeService : IMergeService
             return _encodeWeight * Clamp01(done);
         }
 
+        /// <summary>Per-clip percentages in request order. A clip with no normalize slot already
+        /// conforms, so it is 100 — it is not waiting on work, it simply has none. Called only from
+        /// <see cref="Emit"/>, i.e. always under <see cref="_gate"/>: snapshotting outside the lock
+        /// would tear across a concurrent <see cref="Advance"/> from another clip's encode.</summary>
+        private double[] ClipPercents()
+        {
+            var percents = new double[_clipCount];
+            Array.Fill(percents, 100.0);
+            for (var slot = 0; slot < _slotToClipIndex.Length; slot++)
+            {
+                percents[_slotToClipIndex[slot]] = Math.Clamp(_fractions[slot] * 100.0, 0, 100);
+            }
+
+            return percents;
+        }
+
         private void Emit(MergeJobStatus status, double percent, string? clip)
         {
             var value = Math.Clamp(percent, 0, 100);
@@ -528,7 +727,7 @@ public sealed class MergeService : IMergeService
                 _highWater = value;
             }
 
-            _sink?.Report(new MergeProgress(status, value, clip));
+            _sink?.Report(new MergeProgress(status, value, clip, ClipPercents()));
         }
 
         private static double Clamp01(double value)

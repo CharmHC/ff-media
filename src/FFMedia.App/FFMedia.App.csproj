@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\FFMedia.Core\FFMedia.Core.csproj" />
+    <ProjectReference Include="..\FFMedia.Tools.VideoMerger\FFMedia.Tools.VideoMerger.csproj" />
     <ProjectReference Include="..\FFMedia.Tools.YouTubeDownloader\FFMedia.Tools.YouTubeDownloader.csproj" />
   </ItemGroup>
 

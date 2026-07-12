@@ -2,9 +2,11 @@ using System.IO;
 using System.Windows;
 using FFMedia.App.ViewModels;
 using FFMedia.Core;
+using FFMedia.Tools.VideoMerger;
 using FFMedia.Tools.YouTubeDownloader;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Serilog;
 using Wpf.Ui;
 using Wpf.Ui.DependencyInjection;
@@ -35,6 +37,19 @@ public partial class App : Application
                 services.AddNavigationViewPageProvider();
                 services.AddSingleton<INavigationService, NavigationService>();
                 services.AddYouTubeDownloader();
+
+                // The merger's normalize phase is bounded by the same MaxConcurrency the download
+                // queue uses (SDD §12). AddVideoMergerEngine takes it as a plain int, and inside
+                // ConfigureServices there is no provider to resolve ISettingsService from — so the
+                // setting is read once, from a throwaway SettingsService over the same settings.json.
+                // Read-once matches DownloadManager, which also captures it at construction: a
+                // concurrency change "takes effect after you restart", exactly as Settings warns.
+                services.AddVideoMergerEngine(
+                    dataDirectory: appData,
+                    tempRoot: Path.Combine(Path.GetTempPath(), "FFMedia"),
+                    maxConcurrency: Math.Max(1, new FFMedia.Core.Settings.SettingsService(
+                        appData, NullLogger<FFMedia.Core.Settings.SettingsService>.Instance).Current.MaxConcurrency));
+                services.AddVideoMerger();
                 services.AddSingleton<FFMedia.App.Services.ThemeService>();
                 services.AddSingleton<Wpf.Ui.ISnackbarService, Wpf.Ui.SnackbarService>();
                 services.AddSingleton<FFMedia.Core.Notifications.INotificationService,
