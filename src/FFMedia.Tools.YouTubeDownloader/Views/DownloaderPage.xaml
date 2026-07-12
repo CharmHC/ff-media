@@ -2,7 +2,16 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-      Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      ToolTipService.ShowDuration="30000" ToolTipService.InitialShowDelay="400">
+    <!-- ShowDuration is load-bearing: WPF hides a tooltip after 5 SECONDS by default, which is not
+         long enough to read a two-sentence explanation — the thing vanishes mid-sentence. Inherited by
+         every tooltip on the page.
+
+         Tooltips are attached to the ROW (label + control), not just the control: a user who does not
+         know what "Container" means points at the WORD "Container", and a tooltip on the ComboBox alone
+         says nothing there. Every tooltip names the trade-off, not just the definition — a setting the
+         user cannot weigh is a setting they cannot choose. -->
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     </Page.Resources>
@@ -18,48 +27,72 @@
                        Opacity="0.8" Margin="0,4,0,16" />
 
             <ui:TextBox PlaceholderText="https://www.youtube.com/watch?v=…"
-                        Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}" />
+                        Text="{Binding Url, UpdateSourceTrigger=PropertyChanged}"
+                        ToolTip="Paste a link to a video, a playlist, or a whole channel. A playlist or channel becomes one queued download per video." />
 
-            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+            <StackPanel Orientation="Horizontal" Margin="0,12,0,0"
+                        ToolTip="Video keeps the picture and sound. Audio only throws the picture away and saves just the sound — much smaller, and what you want for music or a podcast.">
                 <TextBlock Text="Output:" VerticalAlignment="Center" Margin="0,0,8,0" />
                 <ComboBox ItemsSource="{Binding Kinds}" SelectedItem="{Binding SelectedKind}" Width="120" />
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
                         Visibility="{Binding IsVideo, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Container:" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}" Width="100" />
-                <TextBlock Text="Resolution:" VerticalAlignment="Center" Margin="16,0,8,0" />
-                <ComboBox ItemsSource="{Binding Resolutions}" SelectedItem="{Binding SelectedResolution}" Width="100" />
+                <StackPanel Orientation="Horizontal"
+                            ToolTip="The kind of video file you get. MP4 plays on virtually anything — phones, TVs, editors — so pick it unless you have a reason not to. MKV and WebM are fine on computers but some devices refuse them.">
+                    <TextBlock Text="Container:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}" Width="100" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal"
+                            ToolTip="How sharp the picture is. 1080p is &quot;Full HD&quot; and is a good default; 2160p is 4K. Higher looks better and takes far more space and time. This is a CEILING — if the video was never published that big, you get the best size below it.">
+                    <TextBlock Text="Resolution:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                    <ComboBox ItemsSource="{Binding Resolutions}" SelectedItem="{Binding SelectedResolution}" Width="100" />
+                </StackPanel>
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
                         Visibility="{Binding IsAudio, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="Format:" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <ComboBox ItemsSource="{Binding AudioFormats}" SelectedItem="{Binding SelectedAudioFormat}" Width="100" />
-                <TextBlock Text="Bitrate:" VerticalAlignment="Center" Margin="16,0,8,0" />
-                <ComboBox ItemsSource="{Binding Bitrates}" SelectedItem="{Binding SelectedBitrate}" Width="100" />
+                <StackPanel Orientation="Horizontal"
+                            ToolTip="The kind of audio file you get. MP3 plays everywhere and is the safe choice. M4A and Opus sound slightly better at the same size. WAV and FLAC are lossless — perfect quality, very large files, and they ignore the bitrate below.">
+                    <TextBlock Text="Format:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ComboBox ItemsSource="{Binding AudioFormats}" SelectedItem="{Binding SelectedAudioFormat}" Width="100" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal"
+                            ToolTip="How much sound quality to keep. Higher means better sound and a bigger file. 192 kbps is fine for most listening; 320 kbps is about as good as MP3 gets. Ignored for WAV and FLAC, which are already lossless.">
+                    <TextBlock Text="Bitrate:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                    <ComboBox ItemsSource="{Binding Bitrates}" SelectedItem="{Binding SelectedBitrate}" Width="100" />
+                </StackPanel>
             </StackPanel>
 
             <StackPanel Margin="0,16,0,0">
                 <TextBlock Text="Processing" FontWeight="SemiBold" />
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                    <TextBlock Text="Trim start:" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <ui:TextBox Text="{Binding TrimStart, UpdateSourceTrigger=PropertyChanged}" Width="90" PlaceholderText="0:00" />
-                    <TextBlock Text="end:" VerticalAlignment="Center" Margin="16,0,8,0" />
-                    <ui:TextBox Text="{Binding TrimEnd, UpdateSourceTrigger=PropertyChanged}" Width="90" PlaceholderText="1:30" />
-                    <CheckBox Content="Precise cut" IsChecked="{Binding PreciseCut}" Margin="16,0,0,0" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal"
+                                ToolTip="Download only part of the video. Type times like 1:30 (one minute thirty) or 1:05:00 (an hour and five minutes). Leave both empty to get the whole thing.">
+                        <TextBlock Text="Trim start:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <ui:TextBox Text="{Binding TrimStart, UpdateSourceTrigger=PropertyChanged}" Width="90" PlaceholderText="0:00" />
+                        <TextBlock Text="end:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                        <ui:TextBox Text="{Binding TrimEnd, UpdateSourceTrigger=PropertyChanged}" Width="90" PlaceholderText="1:30" />
+                    </StackPanel>
+                    <CheckBox Content="Precise cut" IsChecked="{Binding PreciseCut}" Margin="16,0,0,0" VerticalAlignment="Center"
+                              ToolTip="Cut exactly at the times you typed. This is slower, because the video has to be rebuilt around the cut. Left off, the cut jumps to the nearest safe point in the video — usually within a second or two, which is fine for most clips." />
                 </StackPanel>
                 <TextBlock Text="{Binding TrimHint}" Foreground="{DynamicResource SystemFillColorCautionBrush}"
                            Margin="0,4,0,0" TextWrapping="Wrap" />
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                    <CheckBox Content="Embed subtitles" IsChecked="{Binding EmbedSubtitles}" VerticalAlignment="Center" />
-                    <TextBlock Text="Language:" VerticalAlignment="Center" Margin="16,0,8,0" />
-                    <ui:TextBox Text="{Binding SubtitleLanguage}" Width="60" />
+                    <CheckBox Content="Embed subtitles" IsChecked="{Binding EmbedSubtitles}" VerticalAlignment="Center"
+                              ToolTip="Store subtitles inside the video file so they travel with it — no separate .srt to keep track of. Turn them on in your player to see them. Video downloads only; audio files cannot carry subtitles." />
+                    <StackPanel Orientation="Horizontal"
+                                ToolTip="Which subtitle language to fetch, as a short code: en = English, es = Spanish, ja = Japanese, zh = Chinese. If the video has no subtitles in that language, it is downloaded without them.">
+                        <TextBlock Text="Language:" VerticalAlignment="Center" Margin="16,0,8,0" />
+                        <ui:TextBox Text="{Binding SubtitleLanguage}" Width="60" />
+                    </StackPanel>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                    <CheckBox Content="Embed metadata" IsChecked="{Binding EmbedMetadata}" Margin="0,0,16,0" />
-                    <CheckBox Content="Embed thumbnail" IsChecked="{Binding EmbedThumbnail}" />
+                    <CheckBox Content="Embed metadata" IsChecked="{Binding EmbedMetadata}" Margin="0,0,16,0"
+                              ToolTip="Store the title, channel and upload date inside the file, so your player and file browser can show them instead of just a file name. Costs nothing." />
+                    <CheckBox Content="Embed thumbnail" IsChecked="{Binding EmbedThumbnail}"
+                              ToolTip="Use the video's thumbnail as the file's cover art — the picture your player and file browser show for it. Works for MP4, MKV, MP3 and M4A; WebM and Opus may quietly skip it." />
                 </StackPanel>
             </StackPanel>
 
@@ -69,22 +102,29 @@
                     <ComboBox Width="200" ItemsSource="{Binding Presets}"
                               SelectedItem="{Binding SelectedPreset}"
                               DisplayMemberPath="Name"
-                              ToolTip="Choose a saved preset, then Apply" />
-                    <ui:Button Content="Apply" Margin="8,0,0,0" Command="{Binding ApplyPresetCommand}" />
-                    <ui:Button Content="Delete" Margin="8,0,0,0" Command="{Binding DeletePresetCommand}" />
+                              ToolTip="A preset remembers every choice on this page — format, quality, trim, the lot. Pick one and press Apply to fill the page back in, instead of setting it all up again." />
+                    <ui:Button Content="Apply" Margin="8,0,0,0" Command="{Binding ApplyPresetCommand}"
+                               ToolTip="Fill this page in from the selected preset." />
+                    <ui:Button Content="Delete" Margin="8,0,0,0" Command="{Binding DeletePresetCommand}"
+                               ToolTip="Delete the selected preset. Your downloads are not touched." />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                     <ui:TextBox Width="200" PlaceholderText="New preset name"
-                                Text="{Binding NewPresetName, UpdateSourceTrigger=PropertyChanged}" />
+                                Text="{Binding NewPresetName, UpdateSourceTrigger=PropertyChanged}"
+                                ToolTip="Name for the preset you are about to save — for example &quot;Music (MP3 320)&quot; or &quot;Watch later (1080p)&quot;." />
                     <ui:Button Content="Save current as preset" Margin="8,0,0,0"
-                               Command="{Binding SaveAsPresetCommand}" />
+                               Command="{Binding SaveAsPresetCommand}"
+                               ToolTip="Save every choice currently on this page under that name, so you can bring it all back with one click later." />
                 </StackPanel>
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                <ui:Button Content="Add to queue" Appearance="Primary" Command="{Binding AddToQueueCommand}" />
-                <ui:Button Content="Cancel all" Command="{Binding CancelAllCommand}" Margin="8,0,0,0" />
-                <ui:Button Content="Clear completed" Command="{Binding ClearCompletedCommand}" Margin="8,0,0,0" />
+                <ui:Button Content="Add to queue" Appearance="Primary" Command="{Binding AddToQueueCommand}"
+                           ToolTip="Start downloading. A playlist or channel URL is expanded into one download per video. Several run at once — how many is set in Settings." />
+                <ui:Button Content="Cancel all" Command="{Binding CancelAllCommand}" Margin="8,0,0,0"
+                           ToolTip="Stop every download that is running or waiting. Finished ones are kept." />
+                <ui:Button Content="Clear completed" Command="{Binding ClearCompletedCommand}" Margin="8,0,0,0"
+                           ToolTip="Tidy the list by removing the finished rows. The downloaded files themselves are NOT deleted." />
             </StackPanel>
 
             <TextBlock Text="{Binding StatusMessage}" Opacity="0.8" Margin="0,8,0,0" TextWrapping="Wrap" />

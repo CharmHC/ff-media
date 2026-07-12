@@ -11,6 +11,7 @@ using FFMedia.Media;
 using FFMedia.Tools.VideoMerger.Models;
 using FFMedia.Tools.VideoMerger.Services;
 using FFMedia.Tools.VideoMerger.ViewModels;
+using FFMedia.Tests.Views;
 using FFMedia.Tools.VideoMerger.Views;
 using Wpf.Ui.Controls;
 using Xunit;
@@ -29,18 +30,18 @@ namespace FFMedia.Tests.VideoMerger;
 /// <para>So: build the page for real, on an STA thread, against the same two resource dictionaries
 /// App.xaml merges. If any resource lookup in the XAML is wrong, this fails here instead of in front
 /// of the user.</para></summary>
+[Collection("wpf")]
 public class MergerPageLoadTests
 {
+    private readonly WpfHost _wpf;
+
+    public MergerPageLoadTests(WpfHost wpf) => _wpf = wpf;
+
     [Fact]
     public void MergerPage_LoadsItsXaml_WithTheAppsRealResourceDictionaries()
     {
         var error = RunOnStaThread(() =>
         {
-            // Mirrors App.xaml. Without ControlsDictionary every WPF-UI style lookup on the page fails,
-            // which is exactly the class of bug under test.
-            var app = Application.Current ?? new Application();
-            app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ThemesDictionary());
-            app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
 
             // InitializeComponent() — where the XAML is parsed and every StaticResource resolved.
             _ = new MergerPage(BuildViewModel());
@@ -63,9 +64,6 @@ public class MergerPageLoadTests
 
         var error = RunOnStaThread(() =>
         {
-            var app = Application.Current ?? new Application();
-            app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ThemesDictionary());
-            app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
 
             var page = new MergerPage(BuildViewModel());
             pageRoot = page.Content;
@@ -120,9 +118,6 @@ public class MergerPageLoadTests
 
         var error = RunOnStaThread(() =>
         {
-            var app = Application.Current ?? new Application();
-            app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ThemesDictionary());
-            app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
 
             var vm = BuildViewModel();
             var page = new MergerPage(vm);
@@ -192,27 +187,11 @@ public class MergerPageLoadTests
         new StubAnalyzer(), new StubMergeService(), new StubSpeedStore(),
         new StubSettings(), new StubHistory(), new StubNotifications());
 
-    /// <summary>WPF types demand an STA thread; xUnit runs tests on an MTA pool thread.</summary>
-    private static Exception? RunOnStaThread(Action action)
-    {
-        Exception? captured = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                captured = ex;
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        return captured;
-    }
+    /// <summary>Runs on the ONE shared STA thread that owns the ONE WPF Application (see
+    /// <see cref="WpfHost"/>). This used to start a fresh STA thread per test and create its own
+    /// Application — which worked only while this was the sole WPF test class. A second one made the
+    /// two race for the single Application allowed per AppDomain.</summary>
+    private Exception? RunOnStaThread(Action action) => _wpf.Run(action);
 
     // ---- the thinnest possible stubs: this test is about XAML, not behaviour ----
 

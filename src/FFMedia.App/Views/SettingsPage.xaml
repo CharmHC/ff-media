@@ -2,7 +2,10 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-      Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      ToolTipService.ShowDuration="30000" ToolTipService.InitialShowDelay="400">
+    <!-- ShowDuration: WPF hides a tooltip after 5 SECONDS by default, which is not long enough to read
+         a two-sentence explanation. Inherited by every tooltip on the page. -->
     <Page.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </Page.Resources>
@@ -11,31 +14,39 @@
         <TextBlock Text="Changes are saved automatically."
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,16" />
 
-        <TextBlock Text="Default output folder" Margin="0,8,0,4" />
-        <Grid>
+        <TextBlock Text="Default output folder" Margin="0,8,0,4"
+                   ToolTip="Where downloads and merges are saved unless you change it on the page itself. This is only the starting point — each tool lets you pick somewhere else." />
+        <Grid ToolTip="Where downloads and merges are saved unless you change it on the page itself. This is only the starting point — each tool lets you pick somewhere else.">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <ui:TextBox Grid.Column="0" Text="{Binding DefaultOutputFolder}" />
-            <ui:Button Grid.Column="1" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseFolderCommand}" />
+            <ui:Button Grid.Column="1" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseFolderCommand}"
+                       ToolTip="Choose the default folder." />
         </Grid>
 
-        <TextBlock Text="Max concurrent downloads" Margin="0,16,0,4" />
-        <ui:NumberBox Value="{Binding MaxConcurrency, Mode=TwoWay}" Minimum="1" Maximum="10" MaxWidth="160" HorizontalAlignment="Left" />
+        <TextBlock Text="Max concurrent downloads" Margin="0,16,0,4"
+                   ToolTip="How many videos download at the same time. More is not always faster — your connection is shared between them, and too many can get you throttled. 3 is a sensible default; drop to 1 if downloads keep failing." />
+        <ui:NumberBox Value="{Binding MaxConcurrency, Mode=TwoWay}" Minimum="1" Maximum="10" MaxWidth="160" HorizontalAlignment="Left"
+                      ToolTip="How many videos download at the same time. More is not always faster — your connection is shared between them, and too many can get you throttled. 3 is a sensible default; drop to 1 if downloads keep failing." />
         <TextBlock Text="Takes effect after you restart FFMedia."
                    Foreground="{DynamicResource SystemFillColorCriticalBrush}" Margin="0,4,0,0"
                    Visibility="{Binding ConcurrencyRestartPending, Converter={StaticResource BoolToVis}}" />
 
-        <TextBlock Text="Theme" Margin="0,16,0,4" />
-        <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding SelectedTheme, Mode=TwoWay}" MaxWidth="200" HorizontalAlignment="Left" />
+        <TextBlock Text="Theme" Margin="0,16,0,4"
+                   ToolTip="Light, Dark, or System — which follows whatever Windows itself is set to. Applies immediately." />
+        <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding SelectedTheme, Mode=TwoWay}" MaxWidth="200" HorizontalAlignment="Left"
+                  ToolTip="Light, Dark, or System — which follows whatever Windows itself is set to. Applies immediately." />
 
         <TextBlock Text="Updates" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,4" />
         <ui:ToggleSwitch Content="Check for updates on startup"
-                         IsChecked="{Binding CheckForUpdatesOnStartup, Mode=TwoWay}" />
+                         IsChecked="{Binding CheckForUpdatesOnStartup, Mode=TwoWay}"
+                         ToolTip="Look for a new version of FFMedia each time it opens, and show a banner if one exists. It never installs anything on its own — you choose when." />
         <StackPanel Orientation="Horizontal" Margin="0,10,0,0" VerticalAlignment="Center">
             <ui:Button Content="Check for updates now"
-                       Command="{Binding Updates.CheckNowCommand}" />
+                       Command="{Binding Updates.CheckNowCommand}"
+                       ToolTip="Look for a new version of FFMedia right now." />
             <TextBlock Text="{Binding Updates.CurrentVersion, StringFormat='Current: v{0}'}"
                        VerticalAlignment="Center" Margin="12,0,0,0"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
@@ -43,8 +54,9 @@
         <TextBlock Text="{Binding Updates.StatusMessage}"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,6,0,0" />
 
-        <TextBlock Text="Binaries" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,4" />
-        <Grid>
+        <TextBlock Text="Binaries" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,4"
+                   ToolTip="The two tools FFMedia does its actual work with. They are bundled — you do not have to install anything." />
+        <Grid ToolTip="yt-dlp is the tool that does the downloading. YouTube changes how it works fairly often, which breaks yt-dlp until it is updated — so if downloads suddenly start failing, updating this usually fixes it.">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -56,9 +68,11 @@
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             <ui:Button Grid.Column="2" Content="Update yt-dlp"
                        Command="{Binding Binaries.UpdateYtDlpCommand}"
-                       IsEnabled="{Binding Binaries.CanUpdate}" />
+                       IsEnabled="{Binding Binaries.CanUpdate}"
+                       ToolTip="Download the newest yt-dlp. Try this first if downloads that used to work have started failing." />
         </Grid>
-        <Grid Margin="0,8,0,0">
+        <Grid Margin="0,8,0,0"
+              ToolTip="ffmpeg is the tool that converts, trims and joins video. It updates along with FFMedia itself, so there is nothing to do here.">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -69,7 +83,8 @@
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </Grid>
         <ui:ToggleSwitch Content="Check yt-dlp for updates on startup" Margin="0,10,0,0"
-                         IsChecked="{Binding CheckYtDlpForUpdatesOnStartup, Mode=TwoWay}" />
+                         IsChecked="{Binding CheckYtDlpForUpdatesOnStartup, Mode=TwoWay}"
+                         ToolTip="Check for a newer yt-dlp each time FFMedia opens, and tell you if there is one. It never updates on its own. Worth leaving on — a stale yt-dlp is the usual reason downloads break." />
         <TextBlock Text="{Binding Binaries.StatusMessage}"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,6,0,0" />
     </StackPanel>

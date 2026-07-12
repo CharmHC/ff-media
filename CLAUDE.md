@@ -33,6 +33,42 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — Plain-English tooltips on every parameter (Downloader, Merger, Settings)
+
+- **The ask:** casual users cannot understand the parameters. True — they are the vocabulary of video
+  encoding (container, CRF, bitrate, fit mode, sample rate) plus two raw tool names (`yt-dlp`, `ffmpeg`)
+  the app simply leaks at the user. The **Downloader had one tooltip**; the Merger's thirteen were
+  written for an engineer (*"ffmpeg picks its muxer from that"*); **Settings had none**.
+- **The rule that makes them useful: name the TRADE-OFF, not the definition.** *"Lower is better quality
+  and a bigger file. 20 is a good default; above 28 it starts to look blocky."* **A setting you cannot
+  weigh is a setting you cannot choose** — a tooltip that only expands the jargon leaves the user exactly
+  as stuck.
+- **Three details that decide whether they work at all:** (1) attach the tooltip to the **label + control
+  row**, not the control — a user who does not know what "Container" means points at the *word*, and a
+  tooltip on the ComboBox alone says nothing there; (2) set `ToolTipService.ShowDuration` on the page
+  root, because **WPF hides a tooltip after 5 SECONDS** and a two-sentence explanation vanishes
+  mid-sentence; (3) explain the jargon the app itself leaks — *"yt-dlp is the tool that does the
+  downloading. YouTube changes how it works fairly often, which breaks it until it is updated."*
+- **`TooltipCoverageTests`** walks the real pages and fails if any input has no tooltip. It **deliberately
+  does not filter on `IsVisible`** — half the Downloader's parameters live in rows collapsed until the
+  matching output kind is chosen, and skipping hidden controls would have let exactly those ship bare
+  with the test green. Mutation-proven: deleting the (hidden) Bitrate tooltip fails it, naming
+  `ComboBox (Bitrate:)`.
+- **The bug adding a second WPF test class exposed.** WPF allows **one `Application` per AppDomain**,
+  owned by its creating thread. Every WPF test class was starting its own STA thread and calling
+  `Application.Current ?? new Application()` — which worked *only* while `MergerPageLoadTests` was the
+  sole such class. The new class made them race: *"Cannot create more than one Application instance"*,
+  and a `XamlParseException` far from its cause. A shared **`WpfHost`** now owns the one Application and
+  STA dispatcher (xUnit `wpf` collection), with **`ShutdownMode = OnExplicitShutdown`** — the default,
+  `OnLastWindowClose`, lets the first test that closes a window tear the Application down under every
+  test after it. Latent all along; the second class merely triggered it.
+- **Verified:** Release build **0 warnings / 0 errors**; **642/642** unit tests (was 640); **4/4** merge
+  integration tests against real ffmpeg. **Not verified:** the wording on screen — whether the tooltips
+  actually land for a casual reader is a judgement only a human hovering them can make. **Settings is not
+  covered by the test** (it lives in the WinExe, which Tests does not reference); build + eye only.
+- **Next:** user reviews and hovers. SDD → **v0.21** (§13 tooltip rule + §14 WpfHost/coverage). Delivered
+  via branch `feat/plain-english-tooltips` → PR.
+
 ### 2026-07-12 — Repoint the update feed at the canonical repo (pre-release supply-chain fix)
 
 - **Context:** preparing the **v1.1.0** release (first release since v1.0.1; the whole Video Merger

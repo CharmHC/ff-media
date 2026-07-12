@@ -5,7 +5,8 @@
       AllowDrop="True"
       DragOver="OnDragOverPage"
       Drop="OnFilesDropped"
-      Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      ToolTipService.ShowDuration="30000" ToolTipService.InitialShowDelay="400">
     <!-- The Foreground above is load-bearing (SDD §13): WPF's Frame isolates property-value
          inheritance, so the window's foreground never reaches page content and every plain TextBlock
          here would fall back to WPF's default BLACK — invisible in dark mode. -->
@@ -181,35 +182,38 @@
                     </StackPanel>
 
                 <UniformGrid Columns="4" Margin="0,0,0,8">
-                    <StackPanel Margin="0,0,8,8">
+                    <StackPanel Margin="0,0,8,8"
+                                ToolTip="How sharp the merged video is. Every clip is resized to this. Only sizes your clips can actually fill are offered — making the output bigger than your best clip would invent detail that is not there, so it would just be a bigger file that looks the same.">
                         <TextBlock Text="Resolution" />
                         <ComboBox ItemsSource="{Binding Bounds.Resolutions}"
-                                  SelectedItem="{Binding SelectedResolution}"
-                                  ToolTip="Only resolutions your clips can actually fill — upscaling adds no detail" />
+                                  SelectedItem="{Binding SelectedResolution}" />
                     </StackPanel>
-                    <StackPanel Margin="0,0,8,8">
+                    <StackPanel Margin="0,0,8,8"
+                                ToolTip="How many pictures per second the merged video plays. 30 is normal; 60 looks smoother for games and sport. Only rates your clips can actually supply are offered — asking for more than they have would just copy each frame twice, which looks identical and takes longer.">
                         <TextBlock Text="Frame rate" />
                         <ComboBox ItemsSource="{Binding BoundedFrameRates}" SelectedItem="{Binding SelectedFrameRate}"
-                                  DisplayMemberPath="Label"
-                                  ToolTip="Only rates your clips can actually supply — a higher rate would just duplicate frames" />
+                                  DisplayMemberPath="Label" />
                     </StackPanel>
-                    <StackPanel Margin="0,0,0,8">
+                    <StackPanel Margin="0,0,0,8"
+                                ToolTip="The kind of video file you get, and its extension. MP4 plays on virtually anything — phones, TVs, editors — so pick it unless you have a reason not to. MKV is fine on computers but some devices refuse it.">
                         <TextBlock Text="Container" />
-                        <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}"
-                                  ToolTip="Also sets the output file's extension — ffmpeg picks its muxer from that" />
+                        <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}" />
                     </StackPanel>
                 </UniformGrid>
 
                 <UniformGrid Columns="4" Margin="0,0,0,8">
-                    <StackPanel Margin="0,0,8,8">
+                    <StackPanel Margin="0,0,8,8"
+                                ToolTip="How the picture is compressed. H.264 plays on virtually everything and is the safe choice. H.265 makes noticeably smaller files at the same quality, but takes longer to make and older devices cannot play it.">
                         <TextBlock Text="Video codec" />
                         <ComboBox ItemsSource="{Binding VideoCodecs}" SelectedItem="{Binding SelectedVideoCodec}" />
                     </StackPanel>
-                    <StackPanel Margin="0,0,8,8">
+                    <StackPanel Margin="0,0,8,8"
+                                ToolTip="Quality versus file size — the single knob that matters most. LOWER is better quality and a bigger file. 20 is a good default. 18 is near-perfect and large; above 28 it starts to look blocky. Change it in steps of 2 or 3; 1 is barely noticeable.">
                         <TextBlock Text="CRF (quality, 0–51)" />
                         <ui:TextBox Text="{Binding TargetCrf, UpdateSourceTrigger=LostFocus}" />
                     </StackPanel>
-                    <StackPanel Margin="0,0,8,8">
+                    <StackPanel Margin="0,0,8,8"
+                                ToolTip="How the sound is compressed. AAC plays everywhere and is the safe choice. Opus sounds slightly better at the same size, but not everything can play it — see the warning if you pair it with MP4.">
                         <TextBlock Text="Audio codec" />
                         <ComboBox ItemsSource="{Binding AudioCodecs}" SelectedItem="{Binding SelectedAudioCodec}" />
                         <TextBlock Text="MP4 + Opus plays in VLC and Chrome, but not QuickTime or most TVs. MKV or AAC is safer."
@@ -217,22 +221,24 @@
                                    Foreground="{DynamicResource SystemFillColorCautionBrush}"
                                    TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0" />
                     </StackPanel>
-                    <StackPanel Margin="0,0,0,8">
+                    <StackPanel Margin="0,0,0,8"
+                                ToolTip="What to do with a clip whose shape does not match the others — a phone video among widescreen ones, say. Fit adds black bars and keeps the whole picture. Fill crops the edges off to fill the frame. Stretch squashes it to fit, so people look too wide or too tall.">
                         <TextBlock Text="Fit mode" />
-                        <ComboBox ItemsSource="{Binding FitModes}" SelectedItem="{Binding SelectedFitMode}"
-                                  ToolTip="How a clip whose aspect differs from the target is fitted into it" />
+                        <ComboBox ItemsSource="{Binding FitModes}" SelectedItem="{Binding SelectedFitMode}" />
                     </StackPanel>
                 </UniformGrid>
 
                 <UniformGrid Columns="4" Margin="0,0,0,8">
-                    <StackPanel Margin="0,0,8,8">
+                    <StackPanel Margin="0,0,8,8"
+                                ToolTip="Sound detail, in samples per second. 48000 is standard for video and 44100 for music — both sound the same to almost everyone. Only rates your clips can supply are offered; a higher one adds nothing.">
                         <TextBlock Text="Audio sample rate" />
                         <!-- Bound to the NULLABLE projection, like SelectedResolution/SelectedFrameRate:
                              a ComboBox pushes null at SelectedItem while its ItemsSource is rebuilt. -->
                         <ComboBox ItemsSource="{Binding Bounds.SampleRates}"
                                   SelectedItem="{Binding SelectedAudioSampleRate}" />
                     </StackPanel>
-                    <StackPanel Margin="0,0,8,8">
+                    <StackPanel Margin="0,0,8,8"
+                                ToolTip="How many speakers the sound is mixed for. 2 is normal stereo (left and right). 1 is mono — one channel, half the size, fine for speech. Only counts your clips actually have are offered; asking for surround sound your clips do not contain would just add silent channels.">
                         <TextBlock Text="Audio channels" />
                         <ComboBox ItemsSource="{Binding Bounds.ChannelCounts}"
                                   SelectedItem="{Binding SelectedAudioChannels}" />
@@ -241,28 +247,34 @@
                 </StackPanel>
 
                 <TextBlock Text="File name" />
-                <ui:TextBox Text="{Binding OutputFileName, UpdateSourceTrigger=LostFocus}" Margin="0,0,0,8" />
+                <ui:TextBox Text="{Binding OutputFileName, UpdateSourceTrigger=LostFocus}" Margin="0,0,0,8"
+                            ToolTip="What to call the merged video. The extension follows the container you picked. If a file of this name is already there, it is only replaced once the new merge is finished and checked — a failed merge never destroys the old one." />
 
                 <TextBlock Text="Folder" />
-                <Grid Margin="0,0,0,16">
+                <Grid Margin="0,0,0,16"
+                      ToolTip="Where the merged video is saved. Starts from the default folder in Settings.">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <ui:TextBox Grid.Column="0" Text="{Binding OutputFolder, UpdateSourceTrigger=LostFocus}" />
                     <ui:Button Grid.Column="1" Content="Browse…" Icon="{ui:SymbolIcon FolderOpen24}"
-                               Margin="8,0,0,0" Click="OnPickFolder" />
+                               Margin="8,0,0,0" Click="OnPickFolder"
+                               ToolTip="Choose the folder to save the merged video in." />
                 </Grid>
             </StackPanel>
 
             <!-- 4. Summary -->
-            <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" Margin="0,0,0,12" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" Margin="0,0,0,12" TextWrapping="Wrap"
+                       ToolTip="How long the merged video will be, roughly how long the merge will take, and how many clips have to be rebuilt to match the output. Clips that already match are copied as-is, which is almost instant." />
 
             <!-- 5. Actions -->
             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                 <ui:Button Content="Merge" Appearance="Primary" Icon="{ui:SymbolIcon VideoClipMultiple24}"
-                           Command="{Binding MergeCommand}" Margin="0,0,8,0" />
-                <ui:Button Content="Cancel" Command="{Binding CancelCommand}" />
+                           Command="{Binding MergeCommand}" Margin="0,0,8,0"
+                           ToolTip="Join the clips into one video, in the order shown. Clips that do not already match the output are rebuilt to match it first; the rest are copied as-is. Needs at least two clips." />
+                <ui:Button Content="Cancel" Command="{Binding CancelCommand}"
+                           ToolTip="Stop the merge. Nothing half-finished is left behind." />
             </StackPanel>
             <ProgressBar Value="{Binding OverallPercent, Mode=OneWay}" Maximum="100" Height="6" />
             <TextBlock Text="{Binding StatusMessage}" Opacity="0.8" Margin="0,6,0,0" TextWrapping="Wrap" />
