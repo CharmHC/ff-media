@@ -66,6 +66,8 @@ public partial class MergerViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(OutputPath))]
+    [NotifyPropertyChangedFor(nameof(CanMerge))]
+    [NotifyCanExecuteChangedFor(nameof(MergeCommand))]
     private string _outputFileName = "merged.mp4";
 
     /// <summary>True while a merge is running. Gates both commands: one merge at a time (spec D8).</summary>
@@ -273,9 +275,20 @@ public partial class MergerViewModel : ObservableObject
 
     public string OutputPath => Path.Combine(OutputFolder, OutputFileName);
 
+    /// <summary>The output name must actually name a FILE. Blank is the case that matters: the box is
+    /// editable, so clearing it is one keystroke, and <see cref="Path.Combine"/> then quietly yields
+    /// the FOLDER — which we would hand to ffmpeg as the thing to write.</summary>
+    /// <remarks>The damage is out of all proportion to the typo, because the concat is phase TWO: the
+    /// merge would re-encode every clip first, for however many minutes that takes, and only then die
+    /// on a raw ffmpeg error about a path that is a directory. Refuse it up front instead — this is
+    /// the same reason the disk guard runs before any encoding rather than after.</remarks>
+    private bool HasValidOutputFileName =>
+        !string.IsNullOrWhiteSpace(OutputFileName)
+        && OutputFileName.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+
     /// <summary>Merging a single clip is a copy, not a merge — and a second merge while one is
     /// already running would fight it for the temp directory.</summary>
-    public bool CanMerge => Clips.Count >= 2 && !IsMerging;
+    public bool CanMerge => Clips.Count >= 2 && !IsMerging && HasValidOutputFileName;
 
     /// <summary>Probes each path and appends it. A file the analyzer cannot read — or one with no
     /// video track (an audio file) — is rejected here, at add time (spec §8): letting it into the
@@ -712,6 +725,28 @@ public partial class MergerViewModel : ObservableObject
     private static string ExtensionFor(MergeContainer container)
         => container == MergeContainer.Mkv ? ".mkv" : ".mp4";
 
+    /// <summary>Extensions we are willing to treat as "the file's extension" and therefore REPLACE.
+    /// Anything else that follows a dot is part of the name.</summary>
+    private static readonly string[] MediaExtensions =
+        [".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".mpg", ".mpeg", ".wmv", ".flv", ".ts", ".m2ts"];
+
+    /// <summary>Puts <paramref name="extension"/> on <paramref name="fileName"/> — replacing an
+    /// existing media extension, but otherwise APPENDING.</summary>
+    /// <remarks><see cref="Path.ChangeExtension"/> cannot be used here: it replaces everything after
+    /// the LAST dot, whatever that is. Dots are ordinary characters in a file name, so it silently
+    /// eats part of perfectly normal ones — <c>Trip 2026.07.11</c> becomes <c>Trip 2026.07.mp4</c>,
+    /// and <c>S01.E01</c> becomes <c>S01.mp4</c>. The user did not ask us to rename their file; we are
+    /// only here to make the extension agree with the container (which is what ffmpeg picks the muxer
+    /// from). Truncating the name to do it is a cure worse than the disease.</remarks>
+    private static string WithExtension(string fileName, string extension)
+    {
+        var current = Path.GetExtension(fileName);
+
+        return MediaExtensions.Contains(current, StringComparer.OrdinalIgnoreCase)
+            ? string.Concat(fileName.AsSpan(0, fileName.Length - current.Length), extension)
+            : fileName + extension;
+    }
+
     /// <summary>The container an extension asks for, or null if it names one we do not merge to.</summary>
     private static MergeContainer? ContainerFor(string? extension)
     {
@@ -758,7 +793,7 @@ public partial class MergerViewModel : ObservableObject
             return;
         }
 
-        var wanted = Path.ChangeExtension(OutputFileName, ExtensionFor(container));
+        var wanted = WithExtension(OutputFileName, ExtensionFor(container));
         if (string.Equals(wanted, OutputFileName, StringComparison.Ordinal))
         {
             return;

@@ -106,6 +106,30 @@ public class VideoMergerServiceCollectionTests
         Assert.Equal("video-merger", registered.Id);
     }
 
+    /// <summary>The page must be registered IN THE CONTAINER, not merely referenced by the
+    /// <see cref="IToolPage"/> descriptor.</summary>
+    /// <remarks><para>The sibling test asserts <c>page.PageType == typeof(MergerPage)</c>, which is a
+    /// COMPILE-TIME type reference: it passes with `AddTransient&lt;MergerPage&gt;()` deleted, because
+    /// nothing in it ever asks the container for the page. The shell, however, resolves the page by
+    /// type when it navigates — so losing that one line yields a null page in front of the user, and a
+    /// green test suite.</para>
+    /// <para>Asserted against the descriptor rather than by resolving it: a WPF <c>Page</c> cannot be
+    /// constructed on this runner's MTA thread, so an actual resolution would fail for a reason that
+    /// has nothing to do with the registration.</para></remarks>
+    [Fact]
+    public void AddVideoMerger_RegistersThePageInTheContainer_NotJustItsTypeName()
+    {
+        var temp = Path.GetTempPath();
+        var services = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: temp, dataDirectory: temp)
+            .AddSingleton<INotificationService, NullNotifications>()
+            .AddVideoMergerEngine(dataDirectory: temp, tempRoot: temp, maxConcurrency: 2)
+            .AddVideoMerger();
+
+        var page = Assert.Single(services, d => d.ServiceType == typeof(MergerPage));
+        Assert.Equal(ServiceLifetime.Transient, page.Lifetime);
+    }
+
     [Fact]
     public void AddVideoMerger_ResolvesTheViewModel_SoNavigationCannotFailInFrontOfTheUser()
     {

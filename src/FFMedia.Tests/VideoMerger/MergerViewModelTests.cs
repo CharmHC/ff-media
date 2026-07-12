@@ -934,6 +934,67 @@ public class MergerViewModelTests
         Assert.True(h.Vm.IsTargetOverridden);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ABlankOutputFileName_BlocksTheMerge(string blank)
+    {
+        // Path.Combine("C:\out", "") is "C:\out" — the FOLDER. Without this guard the engine is
+        // handed a directory to write, and because the concat is phase TWO it would re-encode every
+        // clip first and only then die on a raw ffmpeg error. Clearing one text box must not cost the
+        // user forty minutes of encoding.
+        var h = await BuildWithClipsAsync(2);
+        Assert.True(h.Vm.CanMerge);
+
+        h.Vm.OutputFileName = blank;
+
+        Assert.False(h.Vm.CanMerge);
+        Assert.False(h.Vm.MergeCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task AnOutputFileNameWithInvalidCharacters_BlocksTheMerge()
+    {
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.OutputFileName = "hol:iday.mp4";
+
+        Assert.False(h.Vm.CanMerge);
+    }
+
+    [Fact]
+    public async Task RestoringTheOutputFileName_UnblocksTheMerge()
+    {
+        // The guard must be a gate, not a trap.
+        var h = await BuildWithClipsAsync(2);
+        h.Vm.OutputFileName = "";
+        Assert.False(h.Vm.CanMerge);
+
+        h.Vm.OutputFileName = "holiday.mp4";
+
+        Assert.True(h.Vm.CanMerge);
+        Assert.True(h.Vm.MergeCommand.CanExecute(null));
+    }
+
+    [Theory]
+    // Dots are ordinary characters in a file name. Path.ChangeExtension replaces everything after the
+    // LAST one, so it silently eats part of perfectly normal names — the user asked us to match the
+    // container, not to rename their file.
+    [InlineData("Trip 2026.07.11", "Trip 2026.07.11.mkv")]
+    [InlineData("S01.E01", "S01.E01.mkv")]
+    [InlineData("holiday", "holiday.mkv")]        // no extension at all → append
+    [InlineData("holiday.mp4", "holiday.mkv")]    // a real media extension → replace
+    [InlineData("holiday.mov", "holiday.mkv")]    // ditto, even one we do not merge to
+    public async Task SyncingTheContainer_NeverTruncatesTheFileName(string typed, string expected)
+    {
+        var h = await BuildWithClipsAsync(2);
+        h.Vm.OutputFileName = typed;
+
+        h.Vm.SelectedContainer = MergeContainer.Mkv;
+
+        Assert.Equal(expected, h.Vm.OutputFileName);
+    }
+
     [Fact]
     public async Task TypingAnMkvExtension_ChoosesTheMkvContainer()
     {
