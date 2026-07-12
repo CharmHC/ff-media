@@ -1,10 +1,20 @@
 # FFMedia
 # <img width="1400" height="500" alt="Cover" src="https://github.com/user-attachments/assets/d7413d62-d135-44c5-a6c4-4eb2f2242c2e" />
 
-An all-in-one **Windows media toolbox**. The first tool is a **YouTube Downloader**
-— paste a URL, pick a format (mp4, mkv, mp3, wav, m4a, opus, flac, …), and download
-it with live progress. More media tools (standardize & merge, and beyond) are on
-the roadmap.
+An all-in-one **Windows media toolbox**, built as a shell that hosts pluggable tools.
+
+- **YouTube Downloader** — paste a URL, pick a format (mp4, mkv, mp3, wav, m4a, opus,
+  flac, …), and download it with live progress, a queue, playlists, trimming and
+  subtitle/metadata embedding.
+- **Video Merger** — drop in local clips, and FFMedia works out a common target
+  (resolution, frame rate, codecs) from the clips themselves, re-encodes **only** the
+  ones that don't already match, and joins them. Order them by hand, or shuffle with
+  chosen clips locked to fixed positions. You see the exact output duration and an
+  estimated merge time before you commit, and real progress (overall and per clip)
+  while it runs. When every clip already matches, nothing is re-encoded and the merge
+  is a fast stream copy.
+
+More tools are on the roadmap.
 
 Under the hood, FFMedia is a polished orchestrator over **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**
 (extraction/download) and **[FFmpeg](https://ffmpeg.org/)** (transcode/mux/trim).
@@ -38,7 +48,7 @@ third-party ffmpeg wrapper library.)
 | M4 | Trim, subtitles, metadata/thumbnail embed |
 | M5 | Settings, presets, history, theming |
 | M6 | Installer + auto-update, v1 release |
-| M7 | Video Merger: standardize + merge local clips |
+| M7 | ✅ Video Merger: standardize + merge local clips |
 
 ## License
 
