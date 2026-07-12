@@ -33,6 +33,40 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — Merger: bound the output options to the source (`TargetBounds`) — design only
+
+- **Done:** brainstormed and specced the fix for *"the output option should not allow any invalid
+  options"* → `docs/superpowers/specs/2026-07-12-merger-target-bounds-design.md`. `MergeTargetDerivation`
+  already takes the **maximum** across the clips (largest dimensions, fastest fps, highest sample rate,
+  most channels) — the override UI just ignored that ceiling, so the user could pick **60 fps from
+  all-30 fps clips** (ffmpeg duplicates every frame: bigger file, longer encode, *zero* new
+  information), 4K from 1080p, 5.1 from stereo, or `1920 × 102` (width and height are *independent*
+  free-text boxes). **CRF and odd dimensions turned out to be already guarded** — my first draft of the
+  spec claimed both were reachable, and reading `MergerViewModel` before planning against it proved me
+  wrong. The real gap is the **ceiling**, plus the aspect-ratio hole two independent boxes leave open.
+- **The design:** a new pure **`TargetBounds`**, built *from the derivation's own maxima*, turns each
+  maximum into a **list of allowed values** — and **the derived target is always the first entry of each
+  list**, so the offered options and the derived target *cannot drift*. That is the same keystone
+  discipline `ConformanceCheck` already enforces, and it is the whole reason not to let the UI compute
+  its own ceiling. Resolution becomes a **dropdown of standard steps at source aspect** instead of two
+  free text boxes, which makes upscaling, **odd dimensions** (the libx264 bug that already bit us once)
+  and absurd aspect ratios *unrepresentable* rather than validated. One rule handles the ceiling moving
+  as clips are added/removed: **snap down to the largest allowed value ≤ the current one**, silently,
+  keeping the override.
+- **The finding worth remembering — I was wrong, and testing said so.** I proposed blocking "invalid"
+  codec × container pairs (Opus-in-MP4 being the obvious one). **So I tested all 8 combinations against
+  the real bundled ffmpeg 8.1 — and every single one muxes cleanly**, Opus-in-MP4 included. There is no
+  invalid combination to block. MP4 + Opus is a **playability** problem (VLC/Chrome play it; QuickTime
+  and most TVs do not), *not* a validity one, and blocking it would have invented a restriction ffmpeg
+  does not have. It gets a **warning**, not a block — which keeps the promise sharp: **a blocked option
+  means "provably pointless", never "we would rather you didn't".** This is the third time this session
+  that checking a belief against the real tool changed the design; the previous two were assumptions
+  about WPF-UI that shipped a crash.
+- **Verified:** the 8-combination mux matrix, against real ffmpeg. No build/tests run — **documentation
+  only, no code touched**.
+- **Next:** user reviews the spec → `writing-plans` for the implementation. SDD → **v0.17** (§13 + the
+  Changelog). Delivered via branch `docs/m7-target-bounds` → PR.
+
 ### 2026-07-12 — M7 PR 2 follow-ups: the six bugs the headed click-through found
 
 - **Context:** PR 2 shipped green (597 tests) with one honest caveat — *"the page itself is not
