@@ -33,6 +33,29 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — Repoint the update feed at the canonical repo (pre-release supply-chain fix)
+
+- **Context:** preparing the **v1.1.0** release (first release since v1.0.1; the whole Video Merger
+  tool landed in between). Before tagging, checked the release machinery — and found the repo had been
+  **renamed** `ChamHC-dev/ff-media` → **`CharmHC/ff-media`**, while both `VelopackUpdateService.RepoUrl`
+  and `release.yml`'s `--repoUrl` still named the **old owner**.
+- **Why it looked fine, and why that is the trap.** GitHub's rename redirect answers the old path: an
+  anonymous `GET /repos/ChamHC-dev/ff-media/releases` returns **200** (verified with curl — 1 redirect
+  followed). Nothing was broken, nothing logged an error. **But the redirect is dropped the moment
+  anyone creates a repository at the abandoned name.** This app *downloads and installs executables*
+  from that URL, so a stale feed is not a broken link — it is a **supply-chain hole**: an attacker
+  squatting `ChamHC-dev/ff-media` would be serving the auto-update to every installed client.
+- **Done:** both URLs now name the canonical owner. SDD §15 records the rule so it cannot rot back.
+  **Existing v1.0.1 installs are unaffected** — they ship the old URL and still resolve through the
+  redirect, so they will find v1.1.0 normally.
+- **Note for the user:** the local git remote still points at the old name (pushes work via the
+  redirect). Repointing it changes where every future push goes, so it is left as an explicit call:
+  `git remote set-url origin https://github.com/CharmHC/ff-media.git`.
+- **Verified:** Release build **0 warnings / 0 errors**; **640/640** unit tests. The redirect behaviour
+  was verified against the live GitHub API, not assumed.
+- **Next:** merge, then tag **v1.1.0** — the tag-gated workflow packs (Velopack) and publishes the
+  GitHub release. SDD → **v0.20**. Delivered via branch `fix/canonical-repo-url` → PR.
+
 ### 2026-07-12 — Merger clip list: column headers, and the checkbox that lied
 
 - **The bug worth remembering — an affordance is a promise.** The per-clip control was a **`CheckBox`**,
