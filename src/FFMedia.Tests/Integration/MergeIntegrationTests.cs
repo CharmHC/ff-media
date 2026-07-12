@@ -213,4 +213,34 @@ public class MergeIntegrationTests : IDisposable
         Assert.Empty(Directory.GetDirectories(_dir, "merge-*"));
         Assert.False(File.Exists(output));
     }
+
+    [Fact]
+    public async Task MergeAsync_ClampedTo720pTarget_ProducesAReal720pFile()
+    {
+        // A resolution ladder that yields something ffmpeg REJECTS — an odd height, a broken aspect —
+        // is precisely the failure this feature would be embarrassed by. And the exit code is exactly
+        // what cannot be trusted (concat exits 0 on a truncated merge), so PROBE the output.
+        var clips = new List<MergeClip>
+        {
+            await ProbeAsync(await MakeClipAsync("a.mp4", "1920x1080", 30, 2)),
+            await ProbeAsync(await MakeClipAsync("b.mp4", "1920x1080", 30, 2)),
+        };
+
+        var infos = clips.Select(c => c.Info).ToList();
+        var bounds = TargetBounds.From(infos);
+        Assert.Contains(new Resolution(1280, 720), bounds.Resolutions);
+
+        var target = MergeTargetDerivation.Derive(infos).ClampTo(bounds) with { Width = 1280, Height = 720 };
+
+        var output = Path.Combine(_dir, "merged720.mp4");
+        var result = await NewService().MergeAsync(new MergeRequest(clips, target, output));
+
+        Assert.True(result.IsSuccess, result.Error);
+
+        // The real proof: probe the OUTPUT, not the exit code.
+        var merged = await AnalyzeAsync(output);
+        Assert.Equal(1280, merged.Video!.Width);
+        Assert.Equal(720, merged.Video.Height);
+        Assert.Equal(4, merged.Duration.TotalSeconds, tolerance: 0.5); // both clips are really there
+    }
 }

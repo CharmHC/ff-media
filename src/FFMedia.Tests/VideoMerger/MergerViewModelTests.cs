@@ -755,8 +755,13 @@ public class MergerViewModelTests
     public async Task Target_OnceOverridden_SurvivesAddingAnotherClip()
     {
         // The user deliberately chose 4K. Adding a 720p clip must not silently undo that.
+        //
+        // a.mp4 is an 8K source so 4K is a genuinely reachable, non-default override (Task 4's bounds
+        // + ClampTo now forbid an override that exceeds every source clip — see
+        // RemovingTheLargestClip_SnapsAnOversizedOverrideDown). A 1080p-only source could never
+        // survive a 4K override under that rule, so the source is bumped rather than the assertion.
         var h = Build();
-        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        h.Analyzer.Returns(@"C:\a.mp4", Info(7680, 4320));
         h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720));
         await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
 
@@ -773,8 +778,10 @@ public class MergerViewModelTests
     [Fact]
     public async Task Target_OnceOverridden_SurvivesRemovingAClipToo()
     {
+        // Same reasoning as Target_OnceOverridden_SurvivesAddingAnotherClip: a.mp4 is bumped to 8K so
+        // the 4K override stays within bounds after b.mp4 (the smaller clip) is removed.
         var h = Build();
-        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        h.Analyzer.Returns(@"C:\a.mp4", Info(7680, 4320));
         h.Analyzer.Returns(@"C:\b.mp4", Info(1280, 720));
         await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
 
@@ -1964,5 +1971,159 @@ public class MergerViewModelTests
 
         Assert.True(h.Vm.MergeCommand.CanExecute(null));
         Assert.Equal(1, h.Merger.Calls);
+    }
+
+    // ---- bounded output options -------------------------------------------
+
+    [Fact]
+    public async Task Bounds_OfferNothingAboveTheSource()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1280, 720));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4"]);
+
+        Assert.Equal(new Resolution(1280, 720), h.Vm.Bounds.Resolutions[0]);
+        Assert.All(h.Vm.Bounds.Resolutions, r => Assert.True(r.PixelCount <= 1280L * 720));
+        Assert.DoesNotContain(new FrameRate(60, 1), h.Vm.Bounds.FrameRates);
+    }
+
+    [Fact]
+    public async Task Bounds_Recompute_WhenAClipIsAdded()
+    {
+        var h = Build();
+        h.Analyzer.Returns(@"C:\small.mp4", Info(1280, 720));
+        h.Analyzer.Returns(@"C:\big.mp4", Info(1920, 1080));
+
+        await h.Vm.AddClipsAsync([@"C:\small.mp4"]);
+        Assert.Equal(new Resolution(1280, 720), h.Vm.Bounds.Resolutions[0]);
+
+        await h.Vm.AddClipsAsync([@"C:\big.mp4"]);
+        Assert.Equal(new Resolution(1920, 1080), h.Vm.Bounds.Resolutions[0]);
+    }
+
+    [Fact]
+    public async Task RemovingTheLargestClip_SnapsAnOversizedOverrideDown()
+    {
+        // The user overrode to 1080p, then deleted the only 1080p clip. The target must not keep
+        // claiming 1080p — every remaining clip would be UPSCALED into it.
+        //
+        // small.mp4 is added FIRST and big.mp4 only AFTER the override: adding both up front derives
+        // a 1920x1080 target before the override runs, and setting SelectedResolution to that SAME
+        // value is a no-op (the "echo != edit" guard every projected setter shares — see TargetWidth's
+        // remarks) — it would never latch. Overriding while only the 720p clip is present, then adding
+        // the 1080p clip, latches for real and still proves the same snap-down once big.mp4 is gone.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\small.mp4", Info(1280, 720));
+        await h.Vm.AddClipsAsync([@"C:\small.mp4"]);
+
+        h.Vm.SelectedResolution = new Resolution(1920, 1080);
+        Assert.True(h.Vm.IsTargetOverridden);
+
+        h.Analyzer.Returns(@"C:\big.mp4", Info(1920, 1080));
+        await h.Vm.AddClipsAsync([@"C:\big.mp4"]);
+
+        h.Vm.RemoveClip(h.Vm.Clips.Single(c => c.FileName == "big.mp4"));
+
+        Assert.Equal(1280, h.Vm.Target.Width);
+        Assert.Equal(720, h.Vm.Target.Height);
+    }
+
+    [Fact]
+    public async Task RemovingAClip_LeavesAStillValidOverrideAlone()
+    {
+        // The user deliberately chose to go SMALLER. Removing an unrelated clip must not undo that.
+        var h = Build();
+        h.Analyzer.Returns(@"C:\a.mp4", Info(1920, 1080));
+        h.Analyzer.Returns(@"C:\b.mp4", Info(1920, 1080));
+        await h.Vm.AddClipsAsync([@"C:\a.mp4", @"C:\b.mp4"]);
+
+        h.Vm.SelectedResolution = new Resolution(1280, 720);
+        h.Vm.RemoveClip(h.Vm.Clips[0]);
+
+        Assert.Equal(1280, h.Vm.Target.Width);
+        Assert.True(h.Vm.IsTargetOverridden);
+    }
+
+    [Fact]
+    public async Task SelectedResolution_ReflectsTheTarget()
+    {
+        var h = await BuildWithClipsAsync(2);
+
+        Assert.Equal(new Resolution(h.Vm.Target.Width, h.Vm.Target.Height), h.Vm.SelectedResolution);
+    }
+
+    [Fact]
+    public async Task OpusInMp4_WarnsButDoesNotBlock()
+    {
+        // All 8 codec x container combinations mux cleanly in ffmpeg 8.1 — this is a PLAYABILITY
+        // problem (QuickTime and most TVs cannot decode Opus in MP4), not a validity one. Warn; do
+        // not forbid.
+        var h = await BuildWithClipsAsync(2);
+
+        h.Vm.SelectedContainer = MergeContainer.Mp4;
+        h.Vm.SelectedAudioCodec = MergeAudioCodec.Opus;
+        Assert.True(h.Vm.ShowOpusInMp4Warning);
+        Assert.True(h.Vm.CanMerge); // still allowed
+
+        h.Vm.SelectedContainer = MergeContainer.Mkv;
+        Assert.False(h.Vm.ShowOpusInMp4Warning);
+
+        h.Vm.SelectedContainer = MergeContainer.Mp4;
+        h.Vm.SelectedAudioCodec = MergeAudioCodec.Aac;
+        Assert.False(h.Vm.ShowOpusInMp4Warning);
+    }
+
+    [Fact]
+    public void HasClips_IsFalse_WhenTheListIsEmpty_SoThePageCanDisableTheOutputSection()
+    {
+        Assert.False(Build().Vm.HasClips);
+    }
+
+    [Fact]
+    public async Task WhileMerging_TheTargetIsFrozenToo_SoHistoryCannotNameAFileThatWasNeverWritten()
+    {
+        // The clip list is frozen during a merge (CanEditClips) — but the TARGET was not, and the merge
+        // runs against a SNAPSHOT taken when Merge was clicked. So flipping the container mid-merge
+        // rewrote OutputFileName to merged.mkv while the encode, still holding the snapshot, wrote
+        // merged.mp4 — and the history row then named a file that does not exist, in a format that was
+        // never produced. Same reasoning as CanEditClips, one level up.
+        var h = await BuildWithClipsAsync(2);
+        Assert.True(h.Vm.CanEditTarget);
+
+        var nameAtClick = h.Vm.OutputFileName;
+
+        var gate = new TaskCompletionSource();
+        h.Merger.Behavior = async (request, _, _) =>
+        {
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var merging = h.Vm.MergeCommand.ExecuteAsync(null);
+        Assert.True(h.Vm.IsMerging);
+        Assert.False(h.Vm.CanEditTarget);
+
+        gate.SetResult();
+        await merging;
+
+        // The history row must describe the file the merge actually wrote.
+        var entry = Assert.Single(h.History.Entries);
+        Assert.Equal(h.Merger.Request!.OutputPath, entry.OutputPath);
+        Assert.Equal(nameAtClick, Path.GetFileName(entry.OutputPath));
+
+        Assert.True(h.Vm.CanEditTarget); // and it thaws, or the page is bricked
+    }
+
+    [Fact]
+    public void CanEditTarget_IsFalse_WithNoClips_ButTheOutputFolderStaysEditable()
+    {
+        // Nothing to bound the target against with an empty list — but picking WHERE a merge will land
+        // is perfectly meaningful before adding a single clip, so the folder must not share that gate.
+        var h = Build();
+
+        Assert.False(h.Vm.CanEditTarget);
+
+        h.Vm.OutputFolder = @"C:\elsewhere";
+        Assert.Equal(@"C:\elsewhere", h.Vm.OutputFolder);
     }
 }

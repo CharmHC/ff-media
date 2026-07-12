@@ -113,82 +113,102 @@
                            Command="{Binding ClearClipsCommand}" />
             </StackPanel>
 
-            <!-- 3. Output — the derived target, every field overridable -->
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <TextBlock Text="(you have overridden the derived target)" Opacity="0.7" FontSize="12"
-                           VerticalAlignment="Center" Margin="8,0,0,0"
-                           Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
-                <ui:Button Content="Reset to derived" Icon="{ui:SymbolIcon ArrowReset24}" Margin="8,0,0,0"
-                           Command="{Binding ResetTargetToDerivedCommand}"
-                           Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
+            <!-- 3. Output -->
+            <StackPanel>
+                <!-- The TARGET fields only. Gated on CanEditTarget = HasClips && !IsMerging:
+                     · no clips  → there is no source to bound any of these ComboBoxes against;
+                     · merging   → the merge runs against a SNAPSHOT taken when Merge was clicked, so a
+                       target the user can still edit describes a merge that is not the one running.
+                       Flipping Container to MKV mid-merge would rewrite OutputFileName to merged.mkv
+                       while the encode still writes merged.mp4 — and the history row would then name a
+                       file that does not exist. Same reasoning as CanEditClips, one level up.
+                     File name / Folder / Browse deliberately sit OUTSIDE this gate: picking where a
+                     merge will land is meaningful before any clip has been added. -->
+                <StackPanel IsEnabled="{Binding CanEditTarget}">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <TextBlock Text="(you have overridden the derived target)" Opacity="0.7" FontSize="12"
+                                   VerticalAlignment="Center" Margin="8,0,0,0"
+                                   Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
+                        <ui:Button Content="Reset to derived" Icon="{ui:SymbolIcon ArrowReset24}" Margin="8,0,0,0"
+                                   Command="{Binding ResetTargetToDerivedCommand}"
+                                   Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+
+                <UniformGrid Columns="4" Margin="0,0,0,8">
+                    <StackPanel Margin="0,0,8,8">
+                        <TextBlock Text="Resolution" />
+                        <ComboBox ItemsSource="{Binding Bounds.Resolutions}"
+                                  SelectedItem="{Binding SelectedResolution}"
+                                  ToolTip="Only resolutions your clips can actually fill — upscaling adds no detail" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,8">
+                        <TextBlock Text="Frame rate" />
+                        <ComboBox ItemsSource="{Binding BoundedFrameRates}" SelectedItem="{Binding SelectedFrameRate}"
+                                  DisplayMemberPath="Label"
+                                  ToolTip="Only rates your clips can actually supply — a higher rate would just duplicate frames" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,0,8">
+                        <TextBlock Text="Container" />
+                        <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}"
+                                  ToolTip="Also sets the output file's extension — ffmpeg picks its muxer from that" />
+                    </StackPanel>
+                </UniformGrid>
+
+                <UniformGrid Columns="4" Margin="0,0,0,8">
+                    <StackPanel Margin="0,0,8,8">
+                        <TextBlock Text="Video codec" />
+                        <ComboBox ItemsSource="{Binding VideoCodecs}" SelectedItem="{Binding SelectedVideoCodec}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,8">
+                        <TextBlock Text="CRF (quality, 0–51)" />
+                        <ui:TextBox Text="{Binding TargetCrf, UpdateSourceTrigger=LostFocus}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,8">
+                        <TextBlock Text="Audio codec" />
+                        <ComboBox ItemsSource="{Binding AudioCodecs}" SelectedItem="{Binding SelectedAudioCodec}" />
+                        <TextBlock Text="MP4 + Opus plays in VLC and Chrome, but not QuickTime or most TVs. MKV or AAC is safer."
+                                   Visibility="{Binding ShowOpusInMp4Warning, Converter={StaticResource BoolToVisibility}}"
+                                   Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                   TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,0,8">
+                        <TextBlock Text="Fit mode" />
+                        <ComboBox ItemsSource="{Binding FitModes}" SelectedItem="{Binding SelectedFitMode}"
+                                  ToolTip="How a clip whose aspect differs from the target is fitted into it" />
+                    </StackPanel>
+                </UniformGrid>
+
+                <UniformGrid Columns="4" Margin="0,0,0,8">
+                    <StackPanel Margin="0,0,8,8">
+                        <TextBlock Text="Audio sample rate" />
+                        <!-- Bound to the NULLABLE projection, like SelectedResolution/SelectedFrameRate:
+                             a ComboBox pushes null at SelectedItem while its ItemsSource is rebuilt. -->
+                        <ComboBox ItemsSource="{Binding Bounds.SampleRates}"
+                                  SelectedItem="{Binding SelectedAudioSampleRate}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,8">
+                        <TextBlock Text="Audio channels" />
+                        <ComboBox ItemsSource="{Binding Bounds.ChannelCounts}"
+                                  SelectedItem="{Binding SelectedAudioChannels}" />
+                    </StackPanel>
+                </UniformGrid>
+                </StackPanel>
+
+                <TextBlock Text="File name" />
+                <ui:TextBox Text="{Binding OutputFileName, UpdateSourceTrigger=LostFocus}" Margin="0,0,0,8" />
+
+                <TextBlock Text="Folder" />
+                <Grid Margin="0,0,0,16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBox Grid.Column="0" Text="{Binding OutputFolder, UpdateSourceTrigger=LostFocus}" />
+                    <ui:Button Grid.Column="1" Content="Browse…" Icon="{ui:SymbolIcon FolderOpen24}"
+                               Margin="8,0,0,0" Click="OnPickFolder" />
+                </Grid>
             </StackPanel>
-
-            <UniformGrid Columns="4" Margin="0,0,0,8">
-                <StackPanel Margin="0,0,8,8">
-                    <TextBlock Text="Width" />
-                    <ui:TextBox Text="{Binding TargetWidth, UpdateSourceTrigger=LostFocus}" />
-                </StackPanel>
-                <StackPanel Margin="0,0,8,8">
-                    <TextBlock Text="Height" />
-                    <ui:TextBox Text="{Binding TargetHeight, UpdateSourceTrigger=LostFocus}" />
-                </StackPanel>
-                <StackPanel Margin="0,0,8,8">
-                    <TextBlock Text="Frame rate" />
-                    <ComboBox ItemsSource="{Binding FrameRates}" SelectedItem="{Binding SelectedFrameRate}"
-                              DisplayMemberPath="Label" />
-                </StackPanel>
-                <StackPanel Margin="0,0,0,8">
-                    <TextBlock Text="Container" />
-                    <ComboBox ItemsSource="{Binding Containers}" SelectedItem="{Binding SelectedContainer}"
-                              ToolTip="Also sets the output file's extension — ffmpeg picks its muxer from that" />
-                </StackPanel>
-            </UniformGrid>
-
-            <UniformGrid Columns="4" Margin="0,0,0,8">
-                <StackPanel Margin="0,0,8,8">
-                    <TextBlock Text="Video codec" />
-                    <ComboBox ItemsSource="{Binding VideoCodecs}" SelectedItem="{Binding SelectedVideoCodec}" />
-                </StackPanel>
-                <StackPanel Margin="0,0,8,8">
-                    <TextBlock Text="CRF (quality, 0–51)" />
-                    <ui:TextBox Text="{Binding TargetCrf, UpdateSourceTrigger=LostFocus}" />
-                </StackPanel>
-                <StackPanel Margin="0,0,8,8">
-                    <TextBlock Text="Audio codec" />
-                    <ComboBox ItemsSource="{Binding AudioCodecs}" SelectedItem="{Binding SelectedAudioCodec}" />
-                </StackPanel>
-                <StackPanel Margin="0,0,0,8">
-                    <TextBlock Text="Fit mode" />
-                    <ComboBox ItemsSource="{Binding FitModes}" SelectedItem="{Binding SelectedFitMode}"
-                              ToolTip="How a clip whose aspect differs from the target is fitted into it" />
-                </StackPanel>
-            </UniformGrid>
-
-            <UniformGrid Columns="4" Margin="0,0,0,8">
-                <StackPanel Margin="0,0,8,8">
-                    <TextBlock Text="Audio sample rate" />
-                    <ui:TextBox Text="{Binding TargetAudioSampleRate, UpdateSourceTrigger=LostFocus}" />
-                </StackPanel>
-                <StackPanel Margin="0,0,8,8">
-                    <TextBlock Text="Audio channels" />
-                    <ui:TextBox Text="{Binding TargetAudioChannels, UpdateSourceTrigger=LostFocus}" />
-                </StackPanel>
-            </UniformGrid>
-
-            <TextBlock Text="File name" />
-            <ui:TextBox Text="{Binding OutputFileName, UpdateSourceTrigger=LostFocus}" Margin="0,0,0,8" />
-
-            <TextBlock Text="Folder" />
-            <Grid Margin="0,0,0,16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <ui:TextBox Grid.Column="0" Text="{Binding OutputFolder, UpdateSourceTrigger=LostFocus}" />
-                <ui:Button Grid.Column="1" Content="Browse…" Icon="{ui:SymbolIcon FolderOpen24}"
-                           Margin="8,0,0,0" Click="OnPickFolder" />
-            </Grid>
 
             <!-- 4. Summary -->
             <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" Margin="0,0,0,12" TextWrapping="Wrap" />

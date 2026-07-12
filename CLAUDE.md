@@ -33,6 +33,67 @@ milestones. Read it before making design decisions.
 
 _Newest first. One entry per completed task/session._
 
+### 2026-07-12 — Merger: `TargetBounds` implemented + proven against real ffmpeg
+
+- **Done:** implemented the design from the same-day "design only" entry below. New pure
+  `TargetBounds` (`FFMedia.Tools.VideoMerger.Models`) exposes four allowed-value lists — resolutions,
+  frame rates, sample rates, channel counts — built from `MergeTargetDerivation`'s own maxima via
+  `TargetBounds.From(clips)`. `MergeTarget.ClampTo(TargetBounds)` forces an out-of-range override back
+  inside bounds. `MergerViewModel` gained `Bounds` (recomputed whenever the clip list changes),
+  `SelectedResolution` (backs a new `Resolution`-bound ComboBox that replaces the old free-text
+  width/height boxes), `ShowOpusInMp4Warning`, and `HasClips`. Landed across five prior tasks on this
+  branch (`feat/m7-target-bounds`); this last task added the real-ffmpeg proof and synced the docs.
+- **The keystone invariant:** the derived target is always the **first entry** of every `TargetBounds`
+  list, because the lists are built from derivation's own maxima rather than recomputed independently
+  by the UI. The offered ComboBox options and the value `MergeTargetDerivation.Derive` actually picks
+  therefore cannot drift apart — the same discipline `ConformanceCheck` already enforces for the fast
+  path (if estimator and merge engine ever disagreed on "does this clip conform", the ETA would
+  describe a different plan than the one that runs; here, if bounds and derivation ever disagreed, the
+  dropdown could offer a value derivation itself would never choose).
+- **The snap-down rule:** `ClampTo` takes the **largest allowed value not exceeding** the current
+  override, falling back to the *smallest* allowed value only when every option exceeds it (e.g. the
+  user deleted the one 1080p clip and only 720p clips remain). It **never snaps up** — that would
+  silently reintroduce the upscaling this whole feature exists to forbid.
+- **Codec × container is deliberately NOT restricted.** All 8 combinations (2 containers × 2 video
+  codecs × 2 audio codecs) were verified to mux cleanly against the real bundled ffmpeg 8.1 back when
+  this was designed. MP4 + Opus is a **playability** problem (VLC/Chrome play it fine; QuickTime and
+  most TVs do not), not a validity one — ffmpeg itself raises no error — so `MergerViewModel` surfaces
+  `ShowOpusInMp4Warning` rather than blocking the combination. A blocked option in this feature always
+  means "provably pointless" (upscaling, odd dimensions, an aspect ratio nothing produced); it never
+  means "we'd rather you didn't."
+- **Proof against real ffmpeg, not mocks:** added
+  `MergeAsync_ClampedTo720pTarget_ProducesAReal720pFile` to `MergeIntegrationTests` — adapted from the
+  plan's draft (which assumed fields `_analyzer`/`_merger`/`_temp` that don't exist in this file) to
+  the file's actual shape: its `NewService()` factory, `MakeClipAsync`/`ProbeAsync`/`AnalyzeAsync`
+  helpers, and `_dir` temp directory. It synthesizes two 1080p `testsrc` clips, derives+clamps+
+  overrides the target to 720p, merges through the real `MergeService`, and — because ffmpeg's concat
+  demuxer **exits 0 even when it silently drops a segment** — probes the *output file* rather than
+  trusting the exit code, asserting real 1280×720 dimensions and ~4 s duration (proving both clips
+  actually landed in the file, not just one).
+- **What the whole-branch review caught (each task passed its own review; the composition still had a
+  gap).** The reviewer hosted the **real page in the real WPF presenter** and drove a 7-step sequence —
+  and could not break the keystone: `Bounds` and `Target` never diverged, a portrait clip correctly
+  clamped `1280×720` → `608×1080` without rotating, and a 12 fps source produced a one-entry list rather
+  than an empty ComboBox. But it found that **the Output panel stayed editable during a merge**. The
+  merge holds a *snapshot* of the target, so flipping Container to MKV mid-merge rewrote
+  `OutputFileName` to `merged.mkv` while the encode still wrote `merged.mp4` — and the **history row
+  then named a file that does not exist, in a format never produced**. Fixed with
+  `CanEditTarget => HasClips && !IsMerging` (the `CanEditClips` precedent, one level up), pinned by a
+  test that is mutation-proven: removing the `IsMerging` gate fails it. Also fixed: the two audio
+  ComboBoxes bound `SelectedItem` to non-nullable `int`s, so the null a ComboBox pushes while its
+  ItemsSource rebuilds was a silently-swallowed binding error (now nullable projections, matching
+  `SelectedResolution`); and the "no clips" gate had frozen **File name / Folder / Browse** too — those
+  are now always live, since choosing where a merge lands is meaningful before adding a clip.
+- **Verified:** Release build **0 warnings / 0 errors**; **637/637** unit tests pass
+  (`Category!=Integration`); **4/4** merge integration tests pass against the real bundled
+  ffmpeg/ffprobe (3 pre-existing + the new 720p one). SDD → **v0.18** (the v0.17 row's closing
+  "design only — no code in this change" is corrected; it is no longer true).
+- **Not verified:** a human has not clicked through the new bounded ComboBoxes in the running app —
+  this dev environment is headless, so the UI is verified by `MergerViewModel` unit tests and a clean
+  build only, consistent with every other M7 UI change in this log.
+- **Next:** none pending for the merger; user reviews and merges the PR for branch
+  `feat/m7-target-bounds`.
+
 ### 2026-07-12 — Merger: bound the output options to the source (`TargetBounds`) — design only
 
 - **Done:** brainstormed and specced the fix for *"the output option should not allow any invalid
