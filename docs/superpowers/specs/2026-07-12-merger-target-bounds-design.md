@@ -14,12 +14,25 @@ pick *any* value — including values that are strictly worse than doing nothing
   longer encode, **not one extra frame of information**.
 - Clips are all 1080p → the user can select **4K**. Upscaled pixels, invented by an interpolator.
 - Clips are stereo → the user can select **5.1**. Four silent channels.
-- Width/Height are free text, so **1920 × 102** is reachable: valid, even, and absurd.
-- CRF is unvalidated, so **CRF 99** is reachable — ffmpeg rejects it outright and the merge fails.
+- Width and Height are **independent** free-text boxes, so **1920 × 102** is reachable: positive,
+  even, encodable — and absurd.
 
 `MergeTargetDerivation` already computes the *maximum* across the clips (largest dimensions, fastest
 frame rate, highest sample rate, most channels) — a deliberate "never degrade a source" rule. The
 override UI simply ignores that ceiling.
+
+**Already guarded — verified in `MergerViewModel`, not assumed:**
+
+| Guard | Where | Status |
+|---|---|---|
+| CRF outside 0–51 | `TargetCrf` setter (`:178`) — out-of-range values are silently ignored | **already safe** |
+| Odd width/height | `TargetWidth`/`TargetHeight` setters (`:150`, `:163`) — `ToEven` | **already safe** |
+
+So this change is **not** about CRF or odd dimensions; an earlier draft of this spec claimed both were
+reachable and it was wrong. It is about the **ceiling** — the one thing nothing enforces — plus the
+aspect-ratio hole that two independent text boxes leave open. The resolution dropdown makes `ToEven`
+*unreachable through the UI* rather than replacing it: the guard stays, because derivation still needs
+it for exotic source files.
 
 **The goal: make the pointless states unrepresentable, not merely rejected.** A value that cannot add
 information should not be offered.
@@ -114,7 +127,7 @@ remains an override — its *other* intent (the user deliberately chose to go sm
 | Frame rate | `ComboBox` (all standard rates) | `ComboBox` bound to `FrameRates` (filtered) |
 | Audio sample rate | `ui:TextBox` | `ComboBox` bound to `SampleRates` |
 | Audio channels | `ui:TextBox` | `ComboBox` bound to `ChannelCounts` |
-| CRF | `ui:TextBox`, unvalidated | `ui:TextBox`, clamped 0–51 on commit |
+| CRF | `ui:TextBox`, already clamped 0–51 | **unchanged** |
 | Container / codecs / FitMode | `ComboBox` | unchanged |
 
 Replacing the text boxes with lists is what makes the bad state **unrepresentable rather than

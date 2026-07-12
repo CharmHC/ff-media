@@ -40,7 +40,10 @@ _Newest first. One entry per completed task/session._
   already takes the **maximum** across the clips (largest dimensions, fastest fps, highest sample rate,
   most channels) — the override UI just ignored that ceiling, so the user could pick **60 fps from
   all-30 fps clips** (ffmpeg duplicates every frame: bigger file, longer encode, *zero* new
-  information), 4K from 1080p, 5.1 from stereo, `1920 × 102`, or CRF 99 (which ffmpeg rejects outright).
+  information), 4K from 1080p, 5.1 from stereo, or `1920 × 102` (width and height are *independent*
+  free-text boxes). **CRF and odd dimensions turned out to be already guarded** — my first draft of the
+  spec claimed both were reachable, and reading `MergerViewModel` before planning against it proved me
+  wrong. The real gap is the **ceiling**, plus the aspect-ratio hole two independent boxes leave open.
 - **The design:** a new pure **`TargetBounds`**, built *from the derivation's own maxima*, turns each
   maximum into a **list of allowed values** — and **the derived target is always the first entry of each
   list**, so the offered options and the derived target *cannot drift*. That is the same keystone
