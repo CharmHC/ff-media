@@ -37,7 +37,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           vpk upload github `
-            --repoUrl https://github.com/ChamHC-dev/ff-media `
+            --repoUrl https://github.com/CharmHC/ff-media `
             --publish `
             --releaseName "FFMedia $env:PACK_VERSION" `
             --tag $env:GITHUB_REF_NAME `

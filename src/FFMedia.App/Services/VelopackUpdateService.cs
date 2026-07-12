@@ -11,7 +11,12 @@ namespace FFMedia.App.Services;
 /// </summary>
 public sealed class VelopackUpdateService : IUpdateService
 {
-    private const string RepoUrl = "https://github.com/ChamHC-dev/ff-media";
+    /// <summary>The CANONICAL owner. The repo was renamed from <c>ChamHC-dev/ff-media</c>, and GitHub's
+    /// rename redirect currently answers the old path — but that redirect is not a guarantee: it is
+    /// dropped the moment anyone creates a repository at the old name. This service downloads and
+    /// installs executables, so a stale URL is not a broken link, it is a supply-chain hole — an
+    /// attacker squatting the abandoned name would be serving the update. Point at the real one.</summary>
+    private const string RepoUrl = "https://github.com/CharmHC/ff-media";
 
     private readonly UpdateManager _manager;
     private readonly ILogger<VelopackUpdateService> _logger;
