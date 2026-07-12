@@ -46,9 +46,21 @@ public partial class MergeClipViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ProgressText))]
     private double _percent;
 
-    [ObservableProperty] private bool _isLocked;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PinTooltip))]
+    private bool _isLocked;
 
-    [ObservableProperty] private int? _lockedIndex;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PinTooltip))]
+    private int? _lockedIndex;
+
+    /// <summary>What the pin toggle says it does — and it has to SAY it. This was a checkbox, which in
+    /// every list UI on earth means "include this row"; the user reasonably read it as "merge this
+    /// clip" when it actually only exempts the row from Shuffle. The control is a pin now, and the
+    /// tooltip states the one thing it affects.</summary>
+    public string PinTooltip => IsLocked && LockedIndex is int index
+        ? $"Pinned to position {index + 1} — Shuffle will leave it there. Click to unpin."
+        : "Pin this clip to its position so Shuffle won't move it. It is merged either way.";
 
     /// <summary>Releasing the lock must release the index with it. <see cref="Ordering.Shuffle"/>
     /// pins any row whose selector returns non-null, so a stale index on an unlocked row would keep

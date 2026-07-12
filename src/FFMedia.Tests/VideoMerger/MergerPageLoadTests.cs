@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 using FFMedia.Core.History;
@@ -102,6 +103,89 @@ public class MergerPageLoadTests
             shellScrollable > 0,
             $"The shell's ScrollViewer reports ScrollableHeight={shellScrollable}, so a page taller than " +
             "the window cannot be scrolled at all.");
+    }
+
+    [Fact]
+    public void PinToggle_SwapsItsGlyph_WhenTheRowIsPinned()
+    {
+        // The pin replaced a checkbox, which the user read as "include this clip in the merge" — the
+        // meaning every list UI gives a checkbox. It only ever exempted the row from Shuffle.
+        //
+        // The glyph swap is a DataTemplate.Trigger on a named element. A trigger that never fires is
+        // invisible to the compiler AND to MergerPage_LoadsItsXaml (which proves only that the XAML
+        // parses): the toggle would look permanently unpinned no matter how often it was clicked. So
+        // realize the row for real and read the glyph out of the visual tree.
+        SymbolRegular? unpinned = null;
+        SymbolRegular? pinned = null;
+
+        var error = RunOnStaThread(() =>
+        {
+            var app = Application.Current ?? new Application();
+            app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ThemesDictionary());
+            app.Resources.MergedDictionaries.Add(new Wpf.Ui.Markup.ControlsDictionary());
+
+            var vm = BuildViewModel();
+            var page = new MergerPage(vm);
+            var window = new Window { Content = page, Width = 1100, Height = 700 };
+            window.Show();
+
+            var clip = new MergeClipViewModel(new MergeClip(
+                @"C:\a.mp4",
+                new MediaInfo(TimeSpan.FromSeconds(5), "mov,mp4,m4a",
+                    new VideoStreamInfo(1920, 1080, new FrameRate(30, 1), "h264", "yuv420p", 0),
+                    new AudioStreamInfo("aac", 48_000, 2))));
+            vm.Clips.Add(clip);
+
+            window.UpdateLayout();
+            unpinned = FindPinIcon(page)?.Symbol;
+
+            clip.IsLocked = true;
+            window.UpdateLayout();
+            pinned = FindPinIcon(page)?.Symbol;
+
+            window.Close();
+        });
+
+        Assert.True(error is null, $"Hosting MergerPage threw:\n{error}");
+        Assert.Equal(SymbolRegular.PinOff24, unpinned);
+        Assert.Equal(SymbolRegular.Pin24, pinned);
+    }
+
+    /// <summary>The first <see cref="SymbolIcon"/> inside the clip list's realized row.</summary>
+    private static SymbolIcon? FindPinIcon(DependencyObject root)
+    {
+        if (root is ToggleButton toggle)
+        {
+            return Descendants<SymbolIcon>(toggle).FirstOrDefault();
+        }
+
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var hit = FindPinIcon(VisualTreeHelper.GetChild(root, i));
+            if (hit is not null)
+            {
+                return hit;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T hit)
+            {
+                yield return hit;
+            }
+
+            foreach (var deeper in Descendants<T>(child))
+            {
+                yield return deeper;
+            }
+        }
     }
 
     private static MergerViewModel BuildViewModel() => new(

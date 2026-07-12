@@ -248,6 +248,35 @@ public class MergeClipViewModelTests
     }
 
     [Fact]
+    public void PinTooltip_SaysWhatPinningActuallyDoes_AndNamesThePosition()
+    {
+        // The control was a CHECKBOX, which in every list UI means "include this row" — and the user
+        // read it exactly that way, believing it chose which clips got merged. It never did: it only
+        // exempts the row from Shuffle. The tooltip has to say so, and it has to say it in BOTH states.
+        var vm = new MergeClipViewModel(Clip(@"C:\a.webm"));
+
+        Assert.Contains("Shuffle", vm.PinTooltip, StringComparison.Ordinal);
+        Assert.Contains("merged either way", vm.PinTooltip, StringComparison.Ordinal);
+
+        vm.SetLock(locked: true, index: 2);
+
+        Assert.Contains("position 3", vm.PinTooltip, StringComparison.Ordinal); // 1-based for a human
+        Assert.Contains("Shuffle", vm.PinTooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PinTooltip_IsRaised_WhenThePinChanges_OrTheToolTipGoesStale()
+    {
+        var vm = new MergeClipViewModel(Clip(@"C:\a.webm"));
+        var raised = new List<string>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+
+        vm.SetLock(locked: true, index: 1);
+
+        Assert.Contains(nameof(MergeClipViewModel.PinTooltip), raised);
+    }
+
+    [Fact]
     public void ClearingIsLockedDirectly_AlsoReleasesTheIndex()
     {
         var vm = new MergeClipViewModel(Clip(@"C:\a.webm"));
