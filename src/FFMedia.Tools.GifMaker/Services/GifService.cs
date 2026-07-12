@@ -169,6 +169,10 @@ public sealed class GifService : IGifService
             // A broken profile store must never fail a GIF the user already has. The next estimate is
             // merely less well calibrated.
         }
+        catch (UnauthorizedAccessException)
+        {
+            // Same rationale as above -- a read-only/locked profile file throws this, not IOException.
+        }
     }
 
     /// <summary>Maps one pass's 0-100 onto its slice of the overall bar.</summary>

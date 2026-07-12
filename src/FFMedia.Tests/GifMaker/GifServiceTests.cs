@@ -42,9 +42,11 @@ public class GifServiceTests : IDisposable
         public Task<Result> RunAsync(
             IReadOnlyList<string> arguments, IProgress<FfmpegProgress>? progress = null, CancellationToken ct = default)
         {
-            ct.ThrowIfCancellationRequested();
             Calls.Add(arguments);
 
+            // Written BEFORE the cancellation check, deliberately: real ffmpeg can already have written
+            // bytes to disk by the moment it is killed. A fake that throws before writing anything can
+            // never expose a caller that forgets to clean up a genuinely half-written file.
             var isRender = arguments.Contains("-lavfi");
             if (isRender && OutputBytes > 0)
             {
@@ -54,6 +56,8 @@ public class GifServiceTests : IDisposable
             {
                 File.WriteAllBytes(arguments[^1], new byte[64]); // the palette
             }
+
+            ct.ThrowIfCancellationRequested();
 
             return Task.FromResult(Behavior(Calls.Count));
         }
@@ -74,9 +78,17 @@ public class GifServiceTests : IDisposable
     {
         public GifSizeProfile Profile { get; set; } = new();
 
+        /// <summary>Lets a test simulate a store whose <see cref="Save"/> throws (e.g. a locked or
+        /// read-only profile file), scriptable per test.</summary>
+        public Action? OnSave { get; set; }
+
         public GifSizeProfile Load() => Profile;
 
-        public void Save(GifSizeProfile profile) => Profile = profile;
+        public void Save(GifSizeProfile profile)
+        {
+            OnSave?.Invoke();
+            Profile = profile;
+        }
     }
 
     private (GifService Service, FakeFfmpeg Ffmpeg, FakeAnalyzer Analyzer, FakeStore Store, GifRequest Request) Build()
@@ -135,12 +147,22 @@ public class GifServiceTests : IDisposable
         // THE RULE: ffmpeg's exit code is exactly what cannot be trusted -- its concat demuxer exits 0
         // having silently dropped segments. A GIF that exits 0 but is not a GIF must NOT be handed over
         // as a success, and must not be left on disk for the user to find and believe.
-        var (service, _, analyzer, _, request) = Build();
-        analyzer.Behavior = _ => Result<MediaInfo>.Failure("Invalid data found when processing input");
+        //
+        // The analyzer must succeed on the SOURCE (so preflight passes and both ffmpeg passes actually
+        // run) and fail only on the OUTPUT (so it's VerifyAsync's re-probe -- not PreflightAsync's probe
+        // of the source -- that this test is proving). A path-blind fake here would let this test pass
+        // for the wrong reason: rejecting the source before ffmpeg is ever invoked.
+        var (service, ffmpeg, analyzer, _, request) = Build();
+        analyzer.Behavior = path => path == request.OutputPath
+            ? Result<MediaInfo>.Failure("Invalid data found when processing input")
+            : Result<MediaInfo>.Success(new MediaInfo(
+                TimeSpan.FromSeconds(3), "mov,mp4,m4a",
+                new VideoStreamInfo(1920, 1080, new FrameRate(30, 1), "h264", "yuv420p", 0), null));
 
         var result = await service.CreateAsync(request);
 
         Assert.False(result.IsSuccess);
+        Assert.Equal(2, ffmpeg.Calls.Count); // both passes actually ran -- this is VerifyAsync's rejection, not preflight's
         Assert.False(File.Exists(request.OutputPath), "a GIF that failed verification must be deleted");
     }
 
@@ -161,9 +183,34 @@ public class GifServiceTests : IDisposable
         var (service, _, _, store, request) = Build();
         var before = store.Profile.SampleCount;
 
-        await service.CreateAsync(request);
+        var result = await service.CreateAsync(request);
 
+        Assert.True(result.IsSuccess, result.Error);
         Assert.Equal(before + 1, store.Profile.SampleCount);
+
+        // Recompute the SAME formula GifSizeProfile.Record uses, from the real output file's real byte
+        // length -- not just the sample count -- so a hard-coded Record(999, 1, 1) inside GifService
+        // cannot pass this test identically to the real `new FileInfo(request.OutputPath).Length`.
+        var actualBytes = new FileInfo(request.OutputPath).Length;
+        var pixelsPerFrame = (long)request.Size.Width * request.Size.Height;
+        var expected = actualBytes / (double)pixelsPerFrame / request.FrameCount;
+        Assert.Equal(expected, store.Profile.BytesPerPixelPerFrame, precision: 10);
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheProfileStoreIsLocked_TheGifIsStillAReportedSuccess()
+    {
+        // RecordActualSize's own comment promises "a broken profile store must never fail a GIF the
+        // user already has" -- but JsonStore<T>.Save throws UnauthorizedAccessException (not IOException)
+        // for a read-only/locked destination, and that does not inherit from IOException. A verified,
+        // successful GIF must not become an unhandled crash just because gif-size.json is locked.
+        var (service, _, _, store, request) = Build();
+        store.OnSave = () => throw new UnauthorizedAccessException("gif-size.json is locked");
+
+        var result = await service.CreateAsync(request);
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.True(File.Exists(request.OutputPath), "the GIF itself must survive a broken profile store");
     }
 
     [Fact]
