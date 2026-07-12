@@ -113,18 +113,27 @@
                            Command="{Binding ClearClipsCommand}" />
             </StackPanel>
 
-            <!-- 3. Output — the derived target, every field overridable. Disabled with no clips: there
-                 is no source to bound any of these ComboBoxes against. -->
-            <StackPanel IsEnabled="{Binding HasClips}">
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    <TextBlock Text="(you have overridden the derived target)" Opacity="0.7" FontSize="12"
-                               VerticalAlignment="Center" Margin="8,0,0,0"
-                               Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
-                    <ui:Button Content="Reset to derived" Icon="{ui:SymbolIcon ArrowReset24}" Margin="8,0,0,0"
-                               Command="{Binding ResetTargetToDerivedCommand}"
-                               Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
-                </StackPanel>
+            <!-- 3. Output -->
+            <StackPanel>
+                <!-- The TARGET fields only. Gated on CanEditTarget = HasClips && !IsMerging:
+                     · no clips  → there is no source to bound any of these ComboBoxes against;
+                     · merging   → the merge runs against a SNAPSHOT taken when Merge was clicked, so a
+                       target the user can still edit describes a merge that is not the one running.
+                       Flipping Container to MKV mid-merge would rewrite OutputFileName to merged.mkv
+                       while the encode still writes merged.mp4 — and the history row would then name a
+                       file that does not exist. Same reasoning as CanEditClips, one level up.
+                     File name / Folder / Browse deliberately sit OUTSIDE this gate: picking where a
+                     merge will land is meaningful before any clip has been added. -->
+                <StackPanel IsEnabled="{Binding CanEditTarget}">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <TextBlock Text="(you have overridden the derived target)" Opacity="0.7" FontSize="12"
+                                   VerticalAlignment="Center" Margin="8,0,0,0"
+                                   Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
+                        <ui:Button Content="Reset to derived" Icon="{ui:SymbolIcon ArrowReset24}" Margin="8,0,0,0"
+                                   Command="{Binding ResetTargetToDerivedCommand}"
+                                   Visibility="{Binding IsTargetOverridden, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
 
                 <UniformGrid Columns="4" Margin="0,0,0,8">
                     <StackPanel Margin="0,0,8,8">
@@ -173,15 +182,18 @@
                 <UniformGrid Columns="4" Margin="0,0,0,8">
                     <StackPanel Margin="0,0,8,8">
                         <TextBlock Text="Audio sample rate" />
+                        <!-- Bound to the NULLABLE projection, like SelectedResolution/SelectedFrameRate:
+                             a ComboBox pushes null at SelectedItem while its ItemsSource is rebuilt. -->
                         <ComboBox ItemsSource="{Binding Bounds.SampleRates}"
-                                  SelectedItem="{Binding TargetAudioSampleRate}" />
+                                  SelectedItem="{Binding SelectedAudioSampleRate}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,8,8">
                         <TextBlock Text="Audio channels" />
                         <ComboBox ItemsSource="{Binding Bounds.ChannelCounts}"
-                                  SelectedItem="{Binding TargetAudioChannels}" />
+                                  SelectedItem="{Binding SelectedAudioChannels}" />
                     </StackPanel>
                 </UniformGrid>
+                </StackPanel>
 
                 <TextBlock Text="File name" />
                 <ui:TextBox Text="{Binding OutputFileName, UpdateSourceTrigger=LostFocus}" Margin="0,0,0,8" />

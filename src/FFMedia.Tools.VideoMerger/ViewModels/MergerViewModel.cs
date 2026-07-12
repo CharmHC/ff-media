@@ -119,8 +119,20 @@ public partial class MergerViewModel : ObservableObject
     public IEnumerable<FrameRateOption> BoundedFrameRates => Bounds.FrameRates.Select(rate => new FrameRateOption(rate));
 
     /// <summary>False with an empty clip list: there is no source to bound the output against, so the
-    /// page disables the Output section (a merge needs two clips anyway).</summary>
+    /// page disables the target fields (a merge needs two clips anyway). The output FOLDER and FILE
+    /// NAME stay live — the user may reasonably pick where a merge will land before adding clips.</summary>
     public bool HasClips => Clips.Count > 0;
+
+    /// <summary>Gates the target fields. Same reasoning as <see cref="CanEditClips"/>, one level up:
+    /// the merge runs against a SNAPSHOT of the target taken when Merge was clicked, so a target the
+    /// user can still edit mid-merge is a page describing a merge that is not the one running.
+    ///
+    /// <para>Concretely: flip Container to MKV during a merge and <c>SyncFileNameToContainer</c>
+    /// rewrites <see cref="OutputFileName"/> to <c>merged.mkv</c> — while the encode, holding the
+    /// snapshot, still writes <c>merged.mp4</c>. The history row then names a file that does not
+    /// exist. The conformance badges and the summary line would likewise re-render against a target
+    /// nothing is encoding.</para></summary>
+    public bool CanEditTarget => HasClips && !IsMerging;
 
     /// <summary>MP4 + Opus muxes fine (verified against ffmpeg 8.1 — all 8 codec/container pairs do),
     /// but QuickTime and most TVs cannot decode it. A playability footgun, not an invalid option:
@@ -275,6 +287,38 @@ public partial class MergerViewModel : ObservableObject
             if (value > 0 && value != Target.AudioChannels)
             {
                 OverrideTarget(Target with { AudioChannels = value });
+            }
+        }
+    }
+
+    /// <summary>What the sample-rate ComboBox binds to. NULLABLE on purpose, exactly as
+    /// <see cref="SelectedResolution"/> and <see cref="SelectedFrameRate"/> are: a ComboBox pushes
+    /// <c>null</c> at its SelectedItem while its ItemsSource is being rebuilt (clearing the clip list
+    /// empties <see cref="Bounds"/>). Bound to the plain <c>int</c> property, that null is a failed
+    /// conversion WPF swallows silently — harmless today, but a silent binding error is exactly the
+    /// class of fault this page has shipped before. Absorb the null here instead.</summary>
+    public int? SelectedAudioSampleRate
+    {
+        get => Target.AudioSampleRate;
+        set
+        {
+            if (value is int rate)
+            {
+                TargetAudioSampleRate = rate;
+            }
+        }
+    }
+
+    /// <summary>What the channels ComboBox binds to. Nullable for the same reason as
+    /// <see cref="SelectedAudioSampleRate"/>.</summary>
+    public int? SelectedAudioChannels
+    {
+        get => Target.AudioChannels;
+        set
+        {
+            if (value is int channels)
+            {
+                TargetAudioChannels = channels;
             }
         }
     }
@@ -743,6 +787,7 @@ public partial class MergerViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(CanCancel));
         OnPropertyChanged(nameof(CanEditClips));
+        OnPropertyChanged(nameof(CanEditTarget));
         MergeCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
         AddClipsCommand.NotifyCanExecuteChanged();
@@ -813,6 +858,7 @@ public partial class MergerViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(HasClips));
+        OnPropertyChanged(nameof(CanEditTarget)); // derived from HasClips — it does not raise itself
         OnPropertyChanged(nameof(CanMerge));
 
         // A raised PropertyChanged does not reach ICommand: the button caches its verdict until the
@@ -868,6 +914,8 @@ public partial class MergerViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedAudioCodec));
         OnPropertyChanged(nameof(TargetAudioSampleRate));
         OnPropertyChanged(nameof(TargetAudioChannels));
+        OnPropertyChanged(nameof(SelectedAudioSampleRate));
+        OnPropertyChanged(nameof(SelectedAudioChannels));
         OnPropertyChanged(nameof(SelectedContainer));
         OnPropertyChanged(nameof(SelectedFrameRate));
         OnPropertyChanged(nameof(SelectedResolution));

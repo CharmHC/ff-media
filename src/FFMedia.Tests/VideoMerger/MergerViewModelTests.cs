@@ -2078,4 +2078,52 @@ public class MergerViewModelTests
     {
         Assert.False(Build().Vm.HasClips);
     }
+
+    [Fact]
+    public async Task WhileMerging_TheTargetIsFrozenToo_SoHistoryCannotNameAFileThatWasNeverWritten()
+    {
+        // The clip list is frozen during a merge (CanEditClips) — but the TARGET was not, and the merge
+        // runs against a SNAPSHOT taken when Merge was clicked. So flipping the container mid-merge
+        // rewrote OutputFileName to merged.mkv while the encode, still holding the snapshot, wrote
+        // merged.mp4 — and the history row then named a file that does not exist, in a format that was
+        // never produced. Same reasoning as CanEditClips, one level up.
+        var h = await BuildWithClipsAsync(2);
+        Assert.True(h.Vm.CanEditTarget);
+
+        var nameAtClick = h.Vm.OutputFileName;
+
+        var gate = new TaskCompletionSource();
+        h.Merger.Behavior = async (request, _, _) =>
+        {
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var merging = h.Vm.MergeCommand.ExecuteAsync(null);
+        Assert.True(h.Vm.IsMerging);
+        Assert.False(h.Vm.CanEditTarget);
+
+        gate.SetResult();
+        await merging;
+
+        // The history row must describe the file the merge actually wrote.
+        var entry = Assert.Single(h.History.Entries);
+        Assert.Equal(h.Merger.Request!.OutputPath, entry.OutputPath);
+        Assert.Equal(nameAtClick, Path.GetFileName(entry.OutputPath));
+
+        Assert.True(h.Vm.CanEditTarget); // and it thaws, or the page is bricked
+    }
+
+    [Fact]
+    public void CanEditTarget_IsFalse_WithNoClips_ButTheOutputFolderStaysEditable()
+    {
+        // Nothing to bound the target against with an empty list — but picking WHERE a merge will land
+        // is perfectly meaningful before adding a single clip, so the folder must not share that gate.
+        var h = Build();
+
+        Assert.False(h.Vm.CanEditTarget);
+
+        h.Vm.OutputFolder = @"C:\elsewhere";
+        Assert.Equal(@"C:\elsewhere", h.Vm.OutputFolder);
+    }
 }
