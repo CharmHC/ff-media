@@ -33,28 +33,39 @@ milestones. Read it before making design decisions.
 
 ## ▶️ RESUME HERE (next session)
 
-**The work queued up and ready to execute: M8 — the GIF Maker.**
+**M8 (GIF Maker) is implemented, proven against real ffmpeg, and awaiting the user's PR review and
+merge.** Nothing is queued to execute — the next session's job is almost certainly reacting to that
+review, not starting new work.
 
-- **Plan:** [`docs/superpowers/plans/2026-07-12-m8-gif-maker.md`](docs/superpowers/plans/2026-07-12-m8-gif-maker.md)
-  — 8 TDD tasks, complete with code. **It opens with a "🚦 START HERE" section written for an agent with
-  zero context. Read that first.**
-- **Spec (the *what*):** [`docs/superpowers/specs/2026-07-12-gif-maker-design.md`](docs/superpowers/specs/2026-07-12-gif-maker-design.md)
-- **How to execute:** invoke `superpowers:subagent-driven-development` with the plan. (That skill keeps a
-  ledger at `.superpowers/sdd/progress.md` — **check it before dispatching anything**; if it lists tasks
-  as complete, they are done, and you resume at the first that is not.)
-- **Branch:** `feat/m8-gif-maker`. Branch off `main` **if PR #26 (the spec) is merged** — check whether
-  `docs/superpowers/specs/2026-07-12-gif-maker-design.md` exists on `main`; if it does not, branch off
-  `docs/gif-maker-design` instead, so the spec is present.
+- **Branch:** `feat/m8-gif-maker`. All 8 plan tasks are done: the promotions (`Resolution` →
+  `FFMedia.Media`, `TrimParsing.TryParse` → `FFMedia.Core.Media`), `GifBounds`, `GifArgsBuilder`'s two
+  passes, the calibrated size estimate, `GifService` (preflight → two passes → re-probe → cleanup),
+  `GifMakerViewModel`, the page + `ITool` + DI + tooltips, and the real-ffmpeg integration test.
+- **Open PR:** **not yet opened at hand-off of the doc-sync task** — check `gh pr list` / `gh pr view`
+  for `feat/m8-gif-maker` before assuming its state; the controller that ran this task's steps 1–4 was
+  told to leave the push/PR (step 5) to whoever runs next.
+- **Verified this session:** Release build **0 warnings / 0 errors**; **722/722** unit tests
+  (`Category!=Integration`); **11/11** integration tests (4 merge + 1 gif + 6 pre-existing queue/yt-dlp,
+  all unaffected). The new `GifIntegrationTests` test proves the two claims most likely to regress
+  silently: `-to` is **absolute** on the source timeline (a `-ss 2 -to 5` GIF really is 3.0 s, not 5.0 s),
+  and the output height really is derived from source aspect (270, never a hand-set 102-style value).
+- **Not verified: a human has not clicked through the GIF Maker page.** This dev environment is
+  headless. Worth flagging specifically for that click-through: the page's two `DynamicResource`
+  lookups fail **silently** on a typo (unlike `StaticResource`, which throws at load), so nothing in the
+  test suite would catch a broken one — only eyes on the running page would.
+- **Bugs the review rounds on this branch found, worth knowing before touching this code again:** the
+  re-probe (the entire reason `GifService` exists) was, for a while, pinned by *nothing*, because the
+  fake analyzer used by its own test failed on every path rather than only the output; the merger's
+  "no freeze guard during a running job" bug reappeared twice in `GifMakerViewModel` (a video-swap
+  mid-render, and a history `Title` reading the live property instead of a snapshot); and
+  `gif-size.json`'s `JsonStore` quarantines malformed JSON but not semantically-invalid values, so a
+  hand-edited negative sample count divided by zero and persisted a `NaN`. See the 2026-07-13 Progress
+  Log entry below for the full account of each.
 
-**Open PR at hand-off:** **#26** — `docs/gif-maker-design`, carrying **both the M8 spec and this plan**.
-It should be merged before (or as) the work starts, so the spec and plan live on `main`.
 *(PR #25, the delta-package fix, was merged — `main` @ `628bfcc`. `release.yml` now runs
 `vpk download github` before packing, so the **next** release will be the first to ship a delta:
 ~19 MB instead of ~190 MB. That has not been exercised by a real tag yet; the workflow raises a CI
 **warning** if no delta is produced, so watch for it.)*
-
-**Repo state at hand-off:** `main` green — Release build **0 warnings / 0 errors**, **642/642** unit
-tests, **4/4** merge integration tests. Latest release **v1.1.1** (live; notes written).
 
 **Still not verified by a human, from earlier work** — worth a click-through when convenient: the merger
 page's clip-list **column alignment** (`Grid.IsSharedSizeScope` is the right mechanism, but alignment is
@@ -66,6 +77,67 @@ actually land for a casual reader.
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-13 — M8 GIF Maker: real-ffmpeg proof + doc sync — **M8 complete**
+
+- **Done:** FFMedia's **third tool**, `FFMedia.Tools.GifMaker`, is implemented end to end (Tasks 1–7 of
+  the plan) and this task adds the last piece: a real-ffmpeg integration test, plus the docs. **The
+  shell was not modified** — the tool registers `ITool`/`IToolPage` and the shell discovers it, the same
+  modular seam M7 proved, now proven a third time in a row. Everything up to this task was proven with
+  fakes; `GifIntegrationTests.CreateAsync_MakesARealGif_OfTheRightSizeAndLength` synthesizes a real
+  1280×720/30fps/6s clip with ffmpeg's own `testsrc`, runs it through the real `GifService` (both real
+  ffmpeg passes, real `FfprobeMediaAnalyzer`), and — because ffmpeg's exit code is exactly what cannot be
+  trusted — **probes the output** rather than trusting the `Result`.
+- **The two-pass decision, and why it's non-negotiable.** The obvious `ffmpeg -i in.mp4 out.gif`
+  quantizes to a *generic* 256-colour palette and looks visibly banded and dirty; `palettegen` +
+  `paletteuse` builds the palette from the clip's **own** colours instead, at a cost of ~0.47 s vs
+  0.15 s on a 3 s clip — so the bad route is simply never offered. **But two passes is NOT
+  automatically smaller** (0.57 MB vs 0.38 MB in the spec's own measurement): the dithering that buys
+  smooth gradients also adds noise that compresses worse. Quality vs size is a genuine trade-off here,
+  not a free win — v1 takes the quality side.
+- **The claim this test exists to pin: `-to` is ABSOLUTE, and the seek is frame-accurate.** Both are
+  widely mis-stated (the natural reading of `-ss 2 -to 5` is "5 seconds starting at 2", i.e. ending at
+  7), and both were verified against real ffmpeg back at design time, not assumed. This is the only
+  test in the whole module that checks that reading against **real** ffmpeg rather than a fake that
+  would accept either interpretation identically: it asserts the GIF from `-ss 2 -to 5` on a 6 s source
+  is **3.0 s, not 5.0 s**. A wrong reading here is the single likeliest regression this module could
+  ship, because a fake analyzer literally cannot tell the difference.
+- **The bounds rule, reused rather than reinvented:** size and frame rate are capped at the source — a
+  GIF wider or faster than its source contains no new information — and the source is always the
+  **first entry** of every offered list, the same discipline that keeps the merger's `TargetBounds` from
+  ever drifting from what derivation would actually pick. Height is derived from source aspect via
+  `scale=W:-2`, never a second box — the exact `1920 × 102` hole the merger shipped once.
+- **The output is re-probed before success is reported, and deleted if it fails the re-probe** — the
+  rule this whole service exists to enforce, because ffmpeg's exit code is exactly what cannot be
+  trusted (the merger's `concat` demuxer taught this project that the hard way: it exits 0 having
+  silently dropped segments).
+- **What the review rounds on this branch found — worth naming, because each is a lesson that repeats:**
+  (a) **the re-probe itself was, for a while, pinned by nothing.** The "ffmpeg lies" unit test's fake
+  analyzer failed on *every* path, so the call failed at `PreflightAsync`'s probe of the *source* and
+  never reached `VerifyAsync` at all — deleting the entire re-probe left every test green. Fixed by
+  making the fake path-aware (succeed on the source, fail only on the output), so the test actually
+  exercises the step it claims to. A test only pins an invariant if the fixture can distinguish the
+  invariant holding from it not holding. (b) **The merger's shipped bug pattern reappeared twice** in
+  `GifMakerViewModel`: `LoadVideoAsync` had no freeze guard, so swapping the source video mid-render
+  silently overwrote the running job — and a drop gesture bypasses `CanExecute` entirely, which is
+  exactly why the merger learned to guard in *both* the command and the mutator, not just one. Then the
+  history row's `Title` read the **live** filename property instead of a snapshot taken at render time,
+  so editing the output name mid-render produced a history entry naming a file it doesn't point to.
+  (c) `gif-size.json` is user-visible and hand-editable, and `JsonStore` quarantines only **malformed
+  JSON**, not semantically-invalid values — a syntactically valid `"SampleCount": -1` deserialized
+  cleanly, divided by zero downstream, and **persisted a `NaN`** that would have poisoned every future
+  estimate silently. All three fixed and covered before this task closed.
+- **Verified:** Release build **0 warnings / 0 errors**; **722/722** unit tests (`Category!=Integration`);
+  **11/11** integration tests (the 4 pre-existing merge tests unaffected, the 1 new gif test, and 6
+  pre-existing queue/yt-dlp tests unaffected — the brief's expectation of "5" only counted merge+gif;
+  the full integration suite is larger and all of it stayed green).
+- **Not verified: a human has not clicked through the GIF Maker page.** This environment is headless, so
+  the XAML is checked by build + the page-load test only. Worth flagging specifically: the page's two
+  `DynamicResource` lookups fail **silently** on a typo, unlike `StaticResource` (which throws at page
+  load) — nothing in the suite would catch a broken one.
+- **Next:** the branch is ready for the user's PR review. SDD → **v0.24** (§5 dependency-rule note on
+  the two promotions, §17 M8 row → complete, Changelog). Delivered via branch `feat/m8-gif-maker`
+  → PR (opened by the controller, not this task).
 
 ### 2026-07-12 — M8 GIF Maker: implementation plan (no code)
 
