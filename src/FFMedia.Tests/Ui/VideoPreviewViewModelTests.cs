@@ -50,6 +50,48 @@ public class VideoPreviewViewModelTests
         public void Pause() => IsPlaying = false;
     }
 
+    /// <summary>A player that does NOT answer synchronously — the test decides exactly when (and
+    /// whether) each <see cref="Open"/> call gets a response, which is the only way to reproduce
+    /// FINDING 1's hang: it depends entirely on the ORDER a second load starts relative to the first's
+    /// still-pending answer, and the real <c>MediaElement</c> answers asynchronously, off a message
+    /// pump this test can't drive.</summary>
+    private sealed class ManualPlayer : IMediaPlayer
+    {
+        public List<string> Opened { get; } = new();
+
+        public TimeSpan Position { get; set; }
+
+        public TimeSpan? Duration { get; private set; }
+
+        public bool IsPlaying { get; private set; }
+
+        public event EventHandler? MediaOpened;
+
+        public event EventHandler<string>? MediaFailed;
+
+        public void Open(string path) => Opened.Add(path);
+
+        /// <summary>Raises whatever answer is currently "in flight" from the player's own point of
+        /// view. Just like the real <c>MediaElement</c>, this interface has no way to say WHICH Open
+        /// call an answer belongs to — there is exactly one event stream.</summary>
+        public void Answer(bool success)
+        {
+            if (success)
+            {
+                Duration = TimeSpan.FromSeconds(30);
+                MediaOpened?.Invoke(this, EventArgs.Empty);
+            }
+            else
+            {
+                MediaFailed?.Invoke(this, "Media file download failed.");
+            }
+        }
+
+        public void Play() => IsPlaying = true;
+
+        public void Pause() => IsPlaying = false;
+    }
+
     private sealed class FakeAnalyzer : IMediaAnalyzer
     {
         public Func<string, Result<MediaInfo>> Behavior { get; set; } = _ => Result<MediaInfo>.Success(Info());
@@ -230,5 +272,81 @@ public class VideoPreviewViewModelTests
 
         Assert.Equal(@"C:\second.mp4", player.Opened[^1]);
         Assert.True(vm.IsReady);
+    }
+
+    [Fact]
+    public async Task LoadAsync_CalledAgainBeforeThePlayerAnswers_NeitherCallHangs()
+    {
+        // FINDING 1 (CRITICAL). The buggy code stored the pending open in ONE shared field, resolved
+        // by handlers wired ONCE in the constructor — so whichever attempt the field CURRENTLY pointed
+        // to is the one a late answer resolved, even when that answer belonged to an EARLIER,
+        // superseded load. This VM is a SINGLETON and LoadAsync awaits real I/O (a probe, maybe a whole
+        // transcode), so "drop clip A, then drop clip B before A's player has answered" is a directly
+        // reachable path, not an edge case: under the bug, LoadAsync(A)'s task would never complete —
+        // on the UI thread.
+        //
+        // ManualPlayer does NOT answer synchronously, so this test controls exactly when each Open()
+        // gets a response — the only way to force the ordering that hangs the buggy code.
+        var player = new ManualPlayer();
+        var analyzer = new FakeAnalyzer();
+        var proxies = new FakeProxies();
+        var vm = new VideoPreviewViewModel(analyzer, proxies, player);
+
+        var taskA = vm.LoadAsync(@"C:\a.mp4");
+        Assert.Equal(new[] { @"C:\a.mp4" }, player.Opened); // A's Open landed; nobody has answered yet
+
+        var taskB = vm.LoadAsync(@"C:\b.mp4");
+        Assert.Equal(new[] { @"C:\a.mp4", @"C:\b.mp4" }, player.Opened);
+
+        // Only ONE answer is even representable here — exactly like the real MediaElement, there is
+        // one event stream, not one per Open() call.
+        player.Answer(true);
+
+        // Neither call may hang. WaitAsync means a regression FAILS (times out) instead of freezing
+        // the whole suite forever.
+        await taskA.WaitAsync(TimeSpan.FromSeconds(5));
+        await taskB.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(vm.IsReady); // B is what is actually on screen now
+    }
+
+    [Theory]
+    [InlineData(10, 100)] // 10 fps -> 100 ms/frame
+    [InlineData(50, 20)]  // 50 fps -> 20 ms/frame
+    public async Task StepForward_AtADifferentFrameRate_StepsByExactlyOneOverFps(int fps, int stepMs)
+    {
+        // FINDING 2. Every OTHER fixture in this file runs at 25 fps, where 1/fps happens to be EXACTLY
+        // the 40 ms a hardcoded "return 40ms" mutant also returns — so the existing 25 fps step test
+        // cannot tell a correct implementation from that mutant. An fps that does NOT reduce to 40 ms
+        // is the only way to prove the step is actually DERIVED from the source, not a constant.
+        var (vm, player, analyzer, _) = Build();
+        analyzer.Behavior = _ => Result<MediaInfo>.Success(Info(fps: fps));
+        await vm.LoadAsync(@"C:\clip.mp4");
+        player.Position = TimeSpan.FromSeconds(2);
+
+        vm.StepForward();
+
+        Assert.Equal(2 + stepMs / 1000.0, player.Position.TotalSeconds, 3);
+    }
+
+    [Fact]
+    public async Task CaptureEnd_IsRefused_WhenTheHostHasFrozenIt()
+    {
+        // FINDING 3. Symmetric to Capture_IsRefused_WhenTheHostHasFrozenIt (CaptureSTART), which only
+        // ever calls CaptureStart() directly — so CaptureEnd's OWN method-body guard could be deleted,
+        // alone, and nothing in the suite would notice. That is exactly the asymmetric-guard bug M8
+        // shipped TWICE. The guard must live in the METHOD, not only in CanExecute, because a gesture
+        // that is not a command bypasses CanExecute entirely.
+        var (vm, player, _, _) = Build();
+        await vm.LoadAsync(@"C:\clip.mp4");
+        player.Position = TimeSpan.FromSeconds(5);
+        vm.CanCapture = false;
+
+        var raised = false;
+        vm.EndCaptured += (_, _) => raised = true;
+        vm.CaptureEnd(); // called DIRECTLY, bypassing the command
+        Assert.False(vm.CaptureEndCommand.CanExecute(null));
+
+        Assert.False(raised);
     }
 }

@@ -23,8 +23,12 @@ public partial class VideoPreviewViewModel : ObservableObject
     private readonly IMediaPlayer _player;
 
     private MediaInfo? _info;
-    private string _sourcePath = "";
-    private TaskCompletionSource<bool>? _openAttempt;
+
+    /// <summary>Cancels + supersedes whatever <see cref="LoadAsync"/> call is currently in flight. A
+    /// fresh call cancels the previous one's gate BEFORE doing anything else, so a superseded load is
+    /// abandoned synchronously rather than racing the new one or (Finding 1) leaving its caller's task
+    /// hanging on an answer that will never be correlated back to it.</summary>
+    private CancellationTokenSource? _loadGate;
 
     public VideoPreviewViewModel(IMediaAnalyzer analyzer, IPreviewProxyService proxies, IMediaPlayer player)
     {
@@ -35,9 +39,6 @@ public partial class VideoPreviewViewModel : ObservableObject
         _analyzer = analyzer;
         _proxies = proxies;
         _player = player;
-
-        _player.MediaOpened += (_, _) => _openAttempt?.TrySetResult(true);
-        _player.MediaFailed += (_, _) => _openAttempt?.TrySetResult(false);
     }
 
     /// <summary>The user captured the current moment as the range's START.</summary>
@@ -75,77 +76,138 @@ public partial class VideoPreviewViewModel : ObservableObject
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        IsReady = false;
-        IsPreparingProxy = false;
-        StatusMessage = "";
-        _info = null;
-        _sourcePath = path;
+        // FINDING 1: this VM is a SINGLETON and this method awaits real I/O (a probe, maybe a whole
+        // transcode) -- so a second LoadAsync arriving before the first has answered is a directly
+        // reachable path (drop clip A, then drop clip B before A's player has answered), not an edge
+        // case. Cancel + replace the gate BEFORE anything else, so the previous call is abandoned
+        // synchronously rather than left racing this one.
+        _loadGate?.Cancel();
+        _loadGate?.Dispose();
+        var gate = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _loadGate = gate;
+        var token = gate.Token;
 
-        var probe = await _analyzer.AnalyzeAsync(path, ct).ConfigureAwait(true);
-        if (!probe.IsSuccess || probe.Value is null)
+        try
         {
-            // The ANALYZER'S OWN REASON -- never a generic "not a video". That mistake blamed a user's
-            // perfectly good mp4 for a missing ffprobe binary (CLAUDE.md, M7).
-            StatusMessage = probe.Error ?? "That video could not be read.";
-            return;
-        }
+            IsReady = false;
+            IsPreparingProxy = false;
+            StatusMessage = "";
+            _info = null;
 
-        if (probe.Value.Video is null)
-        {
-            StatusMessage = "That file has no video track, so there is nothing to preview.";
-            return;
-        }
+            var probe = await _analyzer.AnalyzeAsync(path, token).ConfigureAwait(true);
+            if (!probe.IsSuccess || probe.Value is null)
+            {
+                // The ANALYZER'S OWN REASON -- never a generic "not a video". That mistake blamed a
+                // user's perfectly good mp4 for a missing ffprobe binary (CLAUDE.md, M7).
+                StatusMessage = probe.Error ?? "That video could not be read.";
+                return;
+            }
 
-        _info = probe.Value;
-        OnPropertyChanged(nameof(Duration));
+            if (probe.Value.Video is null)
+            {
+                StatusMessage = "That file has no video track, so there is nothing to preview.";
+                return;
+            }
 
-        if (await TryOpenAsync(path).ConfigureAwait(true))
-        {
+            _info = probe.Value;
+            OnPropertyChanged(nameof(Duration));
+
+            if (await TryOpenAsync(path, token).ConfigureAwait(true))
+            {
+                IsReady = true;
+                return;
+            }
+
+            // The player cannot decode this file -- VP9/WebM being the case that actually happens, and
+            // one OUR OWN DOWNLOADER produces. Transcode something it can open.
+            IsPreparingProxy = true;
+            ProxyPercent = 0;
+            StatusMessage = "Preparing a preview…";
+
+            var progress = new Progress<double>(p => ProxyPercent = p);
+            var proxy = await _proxies
+                .GetOrCreateAsync(path, _info, progress, token)
+                .ConfigureAwait(true);
+
+            IsPreparingProxy = false;
+
+            if (!proxy.IsSuccess || proxy.Value is null)
+            {
+                // An AID, never a GATE. The timecode boxes still work. The message always names
+                // "preview" (never just echoes the raw proxy error) so it reads as a stated limitation
+                // rather than an unexplained tool failure -- the underlying reason is still appended
+                // for diagnosis.
+                StatusMessage = proxy.Error is { Length: > 0 } reason
+                    ? $"The preview could not be prepared: {reason}"
+                    : "The preview could not be prepared. You can still type times by hand.";
+                return;
+            }
+
+            if (!await TryOpenAsync(proxy.Value, token).ConfigureAwait(true))
+            {
+                StatusMessage = "The preview could not be played. You can still type times by hand.";
+                return;
+            }
+
+            StatusMessage = "";
             IsReady = true;
-            return;
         }
-
-        // The player cannot decode this file -- VP9/WebM being the case that actually happens, and one
-        // OUR OWN DOWNLOADER produces. Transcode something it can open.
-        IsPreparingProxy = true;
-        ProxyPercent = 0;
-        StatusMessage = "Preparing a preview…";
-
-        var progress = new Progress<double>(p => ProxyPercent = p);
-        var proxy = await _proxies
-            .GetOrCreateAsync(path, _info, progress, ct)
-            .ConfigureAwait(true);
-
-        IsPreparingProxy = false;
-
-        if (!proxy.IsSuccess || proxy.Value is null)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            // An AID, never a GATE. The timecode boxes still work. The message always names "preview"
-            // (never just echoes the raw proxy error) so it reads as a stated limitation rather than an
-            // unexplained tool failure -- the underlying reason is still appended for diagnosis.
-            StatusMessage = proxy.Error is { Length: > 0 } reason
-                ? $"The preview could not be prepared: {reason}"
-                : "The preview could not be prepared. You can still type times by hand.";
-            return;
+            // Superseded by a newer LoadAsync, or the caller's own token was cancelled -- abandon
+            // quietly. Whatever call replaced this one (if any) now owns IsReady/StatusMessage;
+            // overwriting them here would be a race the user could actually see -- a flash of the WRONG
+            // state for the video that is actually on screen now.
         }
-
-        if (!await TryOpenAsync(proxy.Value).ConfigureAwait(true))
-        {
-            StatusMessage = "The preview could not be played. You can still type times by hand.";
-            return;
-        }
-
-        StatusMessage = "";
-        IsReady = true;
     }
 
-    /// <summary>Hands a path to the player and waits for it to say yes or no.</summary>
-    private Task<bool> TryOpenAsync(string path)
+    /// <summary>Hands a path to the player and waits for it to say yes or no.
+    ///
+    /// <para>Each call owns its <b>own</b> <see cref="TaskCompletionSource{TResult}"/> and its own
+    /// player-event subscriptions, torn down together the instant this attempt settles -- by the
+    /// player answering, OR by <paramref name="ct"/> being cancelled. Nothing here reads a shared
+    /// field to decide which attempt an answer belongs to. FINDING 1 was exactly that: one shared
+    /// <c>_openAttempt</c> field, resolved by handlers wired ONCE in the constructor, so a stale answer
+    /// for a superseded load resolved the WRONG caller's task -- and the right one hung forever.</para>
+    /// </summary>
+    private Task<bool> TryOpenAsync(string path, CancellationToken ct)
     {
-        _openAttempt = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempt = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        EventHandler? opened = null;
+        EventHandler<string>? failed = null;
+        var registration = default(CancellationTokenRegistration);
+
+        void Cleanup()
+        {
+            _player.MediaOpened -= opened;
+            _player.MediaFailed -= failed;
+            registration.Dispose();
+        }
+
+        opened = (_, _) =>
+        {
+            Cleanup();
+            attempt.TrySetResult(true);
+        };
+        failed = (_, _) =>
+        {
+            Cleanup();
+            attempt.TrySetResult(false);
+        };
+
+        // Subscribed BEFORE Open, so a player that answers synchronously can't fire into a void.
+        _player.MediaOpened += opened;
+        _player.MediaFailed += failed;
+        registration = ct.Register(() =>
+        {
+            Cleanup();
+            attempt.TrySetCanceled(ct);
+        });
+
         _player.Open(path);
 
-        return _openAttempt.Task;
+        return attempt.Task;
     }
 
     [RelayCommand]
