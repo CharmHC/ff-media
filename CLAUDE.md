@@ -33,41 +33,120 @@ milestones. Read it before making design decisions.
 
 ## ▶️ RESUME HERE (next session)
 
-**M8 (GIF Maker) is MERGED.** **M9 (Video Preview & Frame Capture) is designed AND planned — ready to execute.**
+**M9 (Video Preview & Frame Capture) is MID-EXECUTION. Tasks 1–5 of 7 are code-complete. Pick up at the
+Task 5 review, then Task 6.**
 
-- **Plan:** [`docs/superpowers/plans/2026-07-13-m9-video-preview.md`](docs/superpowers/plans/2026-07-13-m9-video-preview.md)
-  — **7 TDD tasks, complete with code.** It opens with a **🚦 START HERE** section written for an agent with
-  **zero context**. Read that first.
-- **Spec (the *what*):** [`docs/superpowers/specs/2026-07-13-m9-video-preview-design.md`](docs/superpowers/specs/2026-07-13-m9-video-preview-design.md)
-  — Play/pause/seek/frame-step a video, then **‹ Set Start / Set End ›** captures the paused frame's
-  timestamp into the tool's range. Ends **blind timecode entry**. Shared, in a new **`FFMedia.Ui`** layer;
-  **first consumer is the GIF Maker**.
-- **How to execute:** invoke `superpowers:subagent-driven-development` with the plan. (That skill keeps a
-  ledger at `.superpowers/sdd/progress.md` — **check it before dispatching anything**; if it lists tasks as
-  complete, they are done, and you resume at the first that is not. **It currently holds M8's ledger — reset
-  it.**)
-- **Branch:** `feat/m9-video-preview`, off `main`. **No code has been written for M9.**
-- **Two things the spec settled that you must not re-derive:** (1) WPF's `MediaElement` **cannot play
-  VP9/WebM** (verified against real files; MP4/MKV H.264 both open) — and **WebM is a format our own
-  downloader produces**, so the design is *fast path + ffmpeg proxy fallback*, and the proxy **rescales
-  only, never re-times** (a drifted timeline makes every captured timestamp a lie). (2)
-  **`TrimParsing.TryParse` rejects `1:23.45`** — the colon form parses each part with `int.TryParse` — so
-  capture would write an unparseable value and grey out Create until this is fixed.
-- **Repo state:** `main` green — Release build **0 warnings / 0 errors**, **730/730** unit tests, **11/11**
-  integration tests vs real ffmpeg. Latest release **v1.1.1**.
-- **Still unverified by a human** (worth a click-through when convenient): the **GIF Maker page** — layout,
-  drag-and-drop, dark-mode rendering, and whether the tooltips land. Its two `DynamicResource` lookups
-  **fail silently** on a typo (unlike `StaticResource`, which throws at load), so no test covers them.
-- **Deferred M8 minors**, logged for triage: the progress bar stalls during the palette pass (palettegen
-  emits one `out_time` line); `_profiles.Load()` runs a sync JSON read **per keystroke**; nothing enforces
-  a `.gif` extension on the output name; no sweeper for stranded `palette-*.png`; spec §6.1's disk-space
-  guard was silently dropped; `GifErrors`' stderr strings are unverified against real ffmpeg.
+### Where you are, exactly
+
+- **Branch:** `feat/m9-video-preview` (off `main` @ `ba5c9eb`). **HEAD = `38f4596`.** Working tree clean.
+- **Green:** Release build **0 warnings / 0 errors**; **795/795** unit tests (`Category!=Integration`);
+  11 integration tests untouched.
+- **Plan:** [`docs/superpowers/plans/2026-07-13-m9-video-preview.md`](docs/superpowers/plans/2026-07-13-m9-video-preview.md) — 7 TDD tasks, each with the actual code.
+- **Spec:** [`docs/superpowers/specs/2026-07-13-m9-video-preview-design.md`](docs/superpowers/specs/2026-07-13-m9-video-preview-design.md).
+- **Ledger — READ IT FIRST:** [`.superpowers/sdd/progress.md`](.superpowers/sdd/progress.md). It is the
+  recovery map: it names the commits, and **the commits exist in git even when nobody remembers making
+  them**. Trust it and `git log` over any recollection. **Do not re-dispatch a task it marks complete.**
+- **How to execute:** `superpowers:subagent-driven-development`, resuming at Task 5's *review*.
+
+### 🚩 The one thing you must not skip
+
+**Task 5 is committed and green, but it was NEVER REVIEWED.** Its implementer finished the work but the
+session ended before the reviewer could be dispatched; I verified the code myself (build, full suite,
+`TooltipCoverageTests`, `GifMakerPageLoadTests`) and committed it so it could not be lost. **A controller's
+spot-check is not the review gate.** It is the only task on this branch with no independent scrutiny — and
+on this project, the per-task review is what has caught every serious bug (a UI-thread hang in Task 3, a
+permanently-frozen readout in Task 4, a data-loss bug in M8). **Dispatch the task reviewer on
+`724f679..38f4596` before starting Task 6.**
+
+### Then
+
+- **Task 6:** a **real-ffmpeg** integration test — a real **VP9/WebM** source must yield a playable proxy
+  whose duration equals the source's *within a frame*. This is the test that pins the whole design.
+- **Task 7:** docs — `SDD.md` (§5 gains the new **`FFMedia.Ui`** layer, §17 M9 → complete, Changelog,
+  bump to **v0.27**) + a Progress Log entry here. Then the **final whole-branch review** (dispatch it on
+  the *most capable* model), fix what it finds, and **open a PR — do not merge. The user reviews and merges.**
+
+### Facts already settled — do not re-derive them
+
+1. **WPF's `MediaElement` cannot play VP9/WebM** (verified against real files; MP4/MKV H.264 both open).
+   It renders through Windows Media Foundation, so its codec support is *Windows'*, not ours — **and WebM
+   is a format our own downloader produces.** Hence *fast path + ffmpeg proxy fallback*.
+2. **The proxy rescales only. It NEVER re-times.** No `-r`, `-ss`, `-t`, `-vsync`, no frame-dropping
+   filter. The captured timestamp is read from the *player's* position, so a proxy whose timeline drifted
+   would make **every captured time a lie**.
+3. **`TrimParsing` (Task 1) now parses and formats the fractional colon form** (`1:23.45`) and round-trips.
+   The `Format`/`TryParse` pair is the single formatter — the GIF Maker's private `FormatTime` is **gone**,
+   and with it a latent bug where `TimeSpan`'s `h` specifier rendered *hours-of-day*, silently vanishing
+   24 hours on any 24h+ VOD.
+4. **`MediaElement.ScrubbingEnabled` is load-bearing.** Without it, seeking while paused does not render
+   the new frame — the user would capture a timestamp for **a frame they never saw**.
+5. **A gesture that is not a command bypasses `CanExecute` entirely.** Guard in *both* the `CanExecute`
+   and the method body. That bug shipped **twice** in M8.
+
+### Still unverified by a human (needs a headed click-through — this environment is headless)
+
+- **The GIF Maker page**: layout, drag-and-drop, dark-mode rendering, whether the tooltips land. Its
+  `DynamicResource` lookups **fail silently** on a typo (unlike `StaticResource`, which throws at load).
+- **The preview**: whether the readout and slider *visibly advance* while a real video plays. The timer's
+  start/stop/teardown are proven by reflection; a real playing `MediaElement` cannot be driven headlessly.
+
+### Deferred M8 minors, logged for triage
+
+The progress bar stalls during the palette pass (palettegen emits one `out_time` line); `_profiles.Load()`
+runs a sync JSON read **per keystroke**; nothing enforces a `.gif` extension on the output name; no sweeper
+for stranded `palette-*.png`; spec §6.1's disk-space guard was silently dropped; `GifErrors`' stderr strings
+are unverified against real ffmpeg.
 
 ---
 
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-13 — M9 Tasks 1–5: the preview exists, and capture now feeds the GIF Maker
+
+- **Done:** five of M9's seven tasks, on `feat/m9-video-preview` (HEAD `38f4596`). (1) `TrimParsing`
+  gained the fractional colon form + a round-trippable `Format`. (2) The **preview proxy** in
+  `FFMedia.Media` — pure args, a cache key, the service, a sweeper. (3) The new **`FFMedia.Ui`** project,
+  the `IMediaPlayer` seam, and the headless `VideoPreviewViewModel` **including the proxy fallback, which
+  is the whole design**. (4) The `VideoPreview` control + `MediaElementPlayer`. (5) Wiring it into the GIF
+  Maker: **pause on a frame, click Set Start / Set End, and the paused frame's timestamp lands in the
+  box.** Blind timecode entry is over — for the GIF Maker; M10 rolls it out to the Merger and Downloader.
+- **The bug each review caught, and why the review is the gate — not the green suite.** Task 3 shipped a
+  **UI-thread hang**: the pending open lived in *one shared field* while the player's handlers were wired
+  once in the constructor, so loading a second video before the first opened left **the first caller's
+  task never completing**. Task 4 shipped a readout **frozen at `0:00` forever**: `PositionText` never
+  raised `PropertyChanged`, and **WPF only refreshes a binding whose exact path was notified** — capture
+  still read the player's live position, so the *values* were right and the control merely **looked broken
+  and told the user nothing**. Both suites were green. **Neither bug was findable from a passing test.**
+- **Fixtures that could not fail, twice more.** Task 2's failure-path test passed **whether or not the
+  cleanup ran** (the fake only wrote its output on *success*, so there was never a half-written file to
+  clean up). Task 3's frame-step test ran every fixture at **25 fps** — where 1/fps is *exactly* the 40 ms
+  a hardcoded mutant returns. *A test only pins an invariant if the fixture varies along the axis the
+  invariant is about.* That sentence has now earned its place in this log four milestones running.
+- **The no-retiming rule was pinned only by a list of flag names** — and a future *"let's also normalize
+  the frame rate"* edit would express itself as **`fps=` inside the `-vf` value** and walk straight past
+  every `DoesNotContain`. The filter *value* is now checked. This matters more than it looks: the captured
+  timestamp is read from the **player's** position, so a proxy whose timeline drifted from the source's by
+  even a little would make **every captured time a lie**, and the GIF would be cut somewhere other than
+  where the user saw.
+- **A real bug in my own plan's code, found by the reviewer running it.** `TimeSpan`'s custom **`h`
+  specifier renders hours-of-day (0–23), not total hours** — so `Format(25h)` emitted `"1:00:00"`, which
+  parses back as **one hour: twenty-four hours vanished**, no exception, no failing test. Reachable from
+  the Downloader's trim on any 24h+ VOD. **The GIF Maker's private `FormatTime` had the identical bug**;
+  Task 5 deletes it in favour of `TrimParsing.Format`, retiring both at once. *A plan is not evidence.*
+- **Capture refuses to invert the range, and says so.** A moment at or after the current End is **not**
+  silently swallowed and **not** silently reordered — it explains itself in `RangeHint`. *A control that
+  does nothing and says nothing is a dead end.* And capture **freezes while a GIF renders** (the render
+  holds a *snapshot* of the request), gated **both** by `CanExecute` **and** in the method body — because
+  **a gesture that is not a command bypasses `CanExecute` entirely.** That bug shipped twice in M8.
+- **Verified:** Release build **0 warnings / 0 errors**; **795/795** unit tests; 11 integration tests
+  untouched. **Not verified — and this is the handoff's most important line: Task 5 has had NO
+  independent review.** Its implementer finished but the session ended before the reviewer ran; I checked
+  the work myself and committed it so it could not be lost. **A controller's spot-check is not the gate.**
+- **Next:** **review Task 5** (`724f679..38f4596`), then Task 6 (a real-ffmpeg test proving a **VP9/WebM**
+  source yields a proxy of identical duration), then Task 7 (docs, SDD → **v0.27**), then the final
+  whole-branch review → PR. See **▶️ RESUME HERE**.
 
 ### 2026-07-13 — M9: implementation plan (no code)
 
