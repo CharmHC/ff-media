@@ -88,8 +88,10 @@ public static class ServiceCollectionExtensions
 
         // Singleton, exactly like GifMakerViewModel: the loaded video, its position, and IsReady all
         // live in the ViewModel, so a transient one would throw the loaded preview away the moment the
-        // user visits Settings and comes back.
-        services.AddSingleton<VideoPreviewViewModel>();
+        // user visits Settings and comes back. TryAdd for the same reason as the two lines above -- this
+        // is the MOST cross-cutting thing here, and M10 rolls the same preview out to the Merger and the
+        // Downloader; whichever module registered it second would otherwise add a duplicate descriptor.
+        services.TryAddSingleton<VideoPreviewViewModel>();
 
         services.AddSingleton<ITool, GifMakerTool>();
         services.AddSingleton<IToolPage>(new ToolPage("gif-maker", typeof(GifMakerPage)));

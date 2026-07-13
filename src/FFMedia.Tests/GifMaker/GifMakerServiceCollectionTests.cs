@@ -11,6 +11,7 @@ using FFMedia.Tools.GifMaker.ViewModels;
 using FFMedia.Tools.GifMaker.Views;
 using FFMedia.Tools.VideoMerger;
 using FFMedia.Tools.VideoMerger.Services;
+using FFMedia.Ui.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Wpf.Ui.Controls;
 using Xunit;
@@ -151,6 +152,25 @@ public class GifMakerServiceCollectionTests
         Assert.Same(
             provider.GetRequiredService<GifMakerViewModel>(),
             provider.GetRequiredService<GifMakerViewModel>());
+    }
+
+    /// <summary>FINDING (Task 5 review, MINOR 7). The video preview's ViewModel is the most cross-cutting
+    /// thing this module registers — M10 rolls the same preview out to the Merger and the Downloader, and
+    /// whichever of them registers it second would add a SECOND descriptor for the same singleton type.
+    /// The plumbing three lines above it (<c>MediaElementPlayer</c>/<c>IMediaPlayer</c>) already uses
+    /// <c>TryAdd</c> for exactly that reason.</summary>
+    [Fact]
+    public void AddGifMaker_RegistersThePreviewViewModelOnlyOnce_EvenIfAnotherModuleAlsoRegistersIt()
+    {
+        var temp = Path.GetTempPath();
+        var services = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: temp, dataDirectory: temp)
+            .AddSingleton<INotificationService, NullNotifications>()
+            .AddGifMakerEngine(dataDirectory: temp, tempRoot: temp)
+            .AddGifMaker()
+            .AddGifMaker();   // stands in for a second module registering the same shared preview seam
+
+        Assert.Single(services, d => d.ServiceType == typeof(VideoPreviewViewModel));
     }
 
     [Fact]

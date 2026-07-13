@@ -43,6 +43,14 @@ public sealed class PreviewProxyService : IPreviewProxyService
             // it -- the preview must never be a gate, so any environmental failure here becomes a
             // Result.Failure instead, exactly like the environmental catches in DeleteQuietly/SweepStale.
             Directory.CreateDirectory(_proxyDirectory);
+
+            // Preflight — reclaim proxies abandoned by previous runs, exactly where MergeService sweeps
+            // its own orphaned temp directories (from inside its own preflight, not from app startup: a
+            // host that forgets to call the sweeper silently reintroduces the leak). SweepStale swallows
+            // its own environmental failures: the preview is an aid, never a gate, so a temp directory it
+            // cannot enumerate or a file it cannot delete must not stop this proxy being built.
+            SweepStale();
+
             proxyPath = PreviewProxyPath.For(sourcePath, _proxyDirectory);
 
             // Cached from a previous open of this exact file. Re-opening must not pay the transcode again.

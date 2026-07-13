@@ -81,9 +81,20 @@ public partial class GifMakerViewModel : ObservableObject
     /// range (the captured moment is at or after the current end), which is refused with an explanation
     /// in <see cref="RangeHint"/> rather than silently swallowed or silently reordered. A capture whose
     /// other side (<see cref="EndText"/>) does not currently parse is never blocked by it — there is
-    /// nothing real to invert against.</summary>
+    /// nothing real to invert against.
+    ///
+    /// <para>Guarded on <see cref="IsRendering"/> HERE, not only in the preview's own capture command: the
+    /// render holds a <b>snapshot</b>, and today the only thing raising this event is a
+    /// <c>RelayCommand</c> — but M10 adds a draggable range band to this same VM, and <b>a gesture that is
+    /// not a command bypasses <c>CanExecute</c> entirely</b>. That bug shipped twice in M8. The mutator
+    /// defends itself rather than trusting its one current caller.</para></summary>
     private void OnPreviewStartCaptured(object? sender, TimeSpan position)
     {
+        if (IsRendering)
+        {
+            return;
+        }
+
         if (TrimParsing.TryParse(EndText) is { } end && position >= end)
         {
             RangeHint = string.Create(
@@ -99,6 +110,11 @@ public partial class GifMakerViewModel : ObservableObject
     /// current start is refused rather than reordering the range out from under the user.</summary>
     private void OnPreviewEndCaptured(object? sender, TimeSpan position)
     {
+        if (IsRendering)
+        {
+            return;
+        }
+
         if (TrimParsing.TryParse(StartText) is { } start && position <= start)
         {
             RangeHint = string.Create(

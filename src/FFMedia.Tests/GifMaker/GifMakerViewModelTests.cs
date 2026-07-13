@@ -351,7 +351,10 @@ public class GifMakerViewModelTests
         h.Preview.Position = TimeSpan.FromSeconds(50);
         h.Preview.CaptureEndCommand.Execute(null);
 
-        Assert.Equal(TrimParsing.Format(TimeSpan.FromSeconds(50)), h.Vm.EndText);
+        // A LITERAL, not TrimParsing.Format(...) -- computing the expectation with the production
+        // formatter makes the assertion tautological: it would pass against ANY formatter, including one
+        // that truncated the fraction away.
+        Assert.Equal("0:50", h.Vm.EndText);
         Assert.NotEqual(before, h.Vm.EstimateText); // shrunk from the full 200s range down to 50s
     }
 
@@ -369,7 +372,12 @@ public class GifMakerViewModelTests
 
         Assert.Equal(originalStart, h.Vm.StartText); // untouched
         Assert.False(string.IsNullOrWhiteSpace(h.Vm.RangeHint));
-        Assert.Contains("end", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+
+        // Asserted on what only the REFUSAL says. A bare "end" also appears in the ordinary invalid-range
+        // hint ("The end time must be after the start time."), which the un-refused path would produce --
+        // so it could not tell a refusal apart from a silently-accepted inversion.
+        Assert.Contains("invert", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Capture End first", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -384,7 +392,8 @@ public class GifMakerViewModelTests
 
         Assert.Equal(originalEnd, h.Vm.EndText); // untouched
         Assert.False(string.IsNullOrWhiteSpace(h.Vm.RangeHint));
-        Assert.Contains("start", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("invert", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Capture Start first", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -416,6 +425,45 @@ public class GifMakerViewModelTests
         Assert.False(h.Vm.IsRendering);
         Assert.True(h.Preview.CanCapture); // thawed
         Assert.True(h.Preview.CaptureStartCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task WhileRendering_ACaptureThatReachesTheHandlerAnyway_IsStillRefused()
+    {
+        // FINDING (Task 5 review, MINOR 6). The handlers trusted their ONE current caller -- the preview's
+        // CaptureStart body guard -- to have already checked. That holds only while the sole thing raising
+        // StartCaptured is a RelayCommand; M10 adds a draggable range band to this same VM, and a GESTURE
+        // BYPASSES CanExecute ENTIRELY. This project has shipped that exact bug TWICE (M8). So the mutator
+        // defends itself: the render holds a SNAPSHOT, and a Start/End that moves under it describes a job
+        // that is not the one running.
+        //
+        // The simulation of such a gesture: leave CanCapture true while the render is in flight, so the
+        // preview's own guards pass and the captured moment reaches the GIF Maker's handler regardless.
+        var h = await BuildLoadedAsync(seconds: 200);
+        var gate = new TaskCompletionSource();
+        h.Service.Behavior = async (request, _, _) =>
+        {
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var rendering = h.Vm.CreateCommand.ExecuteAsync(null);
+        Assert.True(h.Vm.IsRendering);
+
+        var startBefore = h.Vm.StartText;
+        var endBefore = h.Vm.EndText;
+
+        h.Preview.CanCapture = true;   // the gesture never asked
+        h.Preview.Position = TimeSpan.FromSeconds(7);
+        h.Preview.CaptureStartCommand.Execute(null);
+        h.Preview.Position = TimeSpan.FromSeconds(9);
+        h.Preview.CaptureEndCommand.Execute(null);
+
+        Assert.Equal(startBefore, h.Vm.StartText);
+        Assert.Equal(endBefore, h.Vm.EndText);
+
+        gate.SetResult();
+        await rendering;
     }
 
     // ---- the estimate ----------------------------------------------------------

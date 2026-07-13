@@ -293,4 +293,49 @@ public class PreviewProxyTests : IDisposable
         Assert.True(File.Exists(fresh));
         Assert.True(File.Exists(unrelated));
     }
+
+    /// <summary>FINDING (Task 5 review, IMPORTANT 2). <see cref="PreviewProxyService.SweepStale"/> was
+    /// built and tested — and then called by nothing but the tests. Every fallback transcode leaked a
+    /// proxy into <c>%Temp%</c> forever. It is now called from the service's own preflight, the way
+    /// <c>MergeService</c> calls <c>TempDirectorySweeper.SweepOrphans</c> from its own: self-contained in
+    /// the service rather than bolted onto app startup, where a future host that forgets the call silently
+    /// reintroduces the leak.</summary>
+    [Fact]
+    public async Task GetOrCreateAsync_SweepsStaleProxies_SoAFallbackTranscodeDoesNotLeakForever()
+    {
+        var (service, _, source) = Build();
+
+        var stale = Path.Combine(_dir, "preview-abandoned000000000000.mp4");
+        File.WriteAllBytes(stale, new byte[10]);
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-8));
+
+        var result = await service.GetOrCreateAsync(source, Info());
+
+        Assert.True(result.IsSuccess, result.Error);
+        Assert.False(File.Exists(stale), "A proxy abandoned by a previous run was never reclaimed.");
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_ServedFromCache_StillSweeps_AndTheSweepIsNeverAGate()
+    {
+        // The sweep runs on the cached path too -- a user who only ever re-opens the SAME video would
+        // otherwise never reclaim anything. And it must never break the proxy: the preview is an aid,
+        // never a gate, so a file it cannot delete is skipped rather than raised.
+        var (service, ffmpeg, source) = Build();
+        var first = await service.GetOrCreateAsync(source, Info());
+
+        var stale = Path.Combine(_dir, "preview-abandoned111111111111.mp4");
+        File.WriteAllBytes(stale, new byte[10]);
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-8));
+
+        // Held open: File.Delete throws IOException, which SweepStale swallows.
+        using (var held = File.Open(stale, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var second = await service.GetOrCreateAsync(source, Info());
+
+            Assert.True(second.IsSuccess, second.Error);
+            Assert.Equal(first.Value, second.Value);
+            Assert.Single(ffmpeg.Calls);   // still served from cache
+        }
+    }
 }

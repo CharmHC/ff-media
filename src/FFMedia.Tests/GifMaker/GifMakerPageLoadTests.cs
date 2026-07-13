@@ -1,13 +1,16 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using FFMedia.Core;
 using FFMedia.Core.History;
 using FFMedia.Core.Notifications;
 using FFMedia.Core.Results;
 using FFMedia.Core.Settings;
 using FFMedia.Media;
 using FFMedia.Media.Preview;
+using FFMedia.Tools.GifMaker;
 using FFMedia.Tools.GifMaker.Models;
 using FFMedia.Tools.GifMaker.Services;
 using FFMedia.Tools.GifMaker.ViewModels;
@@ -16,6 +19,7 @@ using FFMedia.Tools.GifMaker.Views;
 using FFMedia.Ui.Playback;
 using FFMedia.Ui.ViewModels;
 using FFMedia.Ui.Views;
+using Microsoft.Extensions.DependencyInjection;
 using Wpf.Ui.Controls;
 using Xunit;
 
@@ -107,6 +111,34 @@ public class GifMakerPageLoadTests
             shellScrollable > 0,
             $"The shell's ScrollViewer reports ScrollableHeight={shellScrollable}, so a page taller than " +
             "the window cannot be scrolled at all.");
+    }
+
+    /// <summary>FINDING (Task 5 review, IMPORTANT 3). Nothing proved the REAL container could construct
+    /// this page any more. <c>GifMakerServiceCollectionTests</c> asserts only that a descriptor exists,
+    /// and every test in this file hand-builds the page (<c>new GifMakerPage(vm, control)</c>), bypassing
+    /// DI entirely — so the constructor parameter this task added could have had no registration behind
+    /// it, the build would be clean, all 795 tests green, and the app would throw <c>Unable to resolve
+    /// service for type 'FFMedia.Ui.Views.VideoPreview'</c> the first time the user clicked the nav item.
+    ///
+    /// <para>So: build the container <c>App.xaml.cs</c> builds and resolve the page out of it — on the STA
+    /// thread, because <c>GifMakerPage</c> and <c>VideoPreview</c> are real WPF objects.</para></summary>
+    [Fact]
+    public void GifMakerPage_ResolvesFromTheRealContainer_SoClickingTheNavItemCannotThrow()
+    {
+        var temp = Path.GetTempPath();
+        using var provider = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: temp, dataDirectory: temp)
+            .AddSingleton<INotificationService, StubNotifications>()
+            .AddGifMakerEngine(dataDirectory: temp, tempRoot: temp)
+            .AddGifMaker()
+            .BuildServiceProvider();
+
+        GifMakerPage? page = null;
+
+        var error = RunOnStaThread(() => page = provider.GetRequiredService<GifMakerPage>());
+
+        Assert.True(error is null, $"The container could not construct GifMakerPage:\n{error}");
+        Assert.NotNull(page);
     }
 
     private static GifMakerViewModel BuildViewModel() => new(
