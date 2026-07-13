@@ -52,7 +52,7 @@ public class GifArgsBuilderTests
     [Fact]
     public void RenderPass_TakesTheVideoAndThePaletteAsTwoInputs()
     {
-        var args = GifArgsBuilder.RenderPass(Request(), @"C:\tmp\palette.png");
+        var args = GifArgsBuilder.RenderPass(Request(), @"C:\tmp\palette.png", @"C:\out.gif");
 
         var inputs = args.Select((a, idx) => (a, idx)).Where(x => x.a == "-i").Select(x => args[x.idx + 1]).ToList();
         Assert.Equal(new[] { @"C:\in.mp4", @"C:\tmp\palette.png" }, inputs);
@@ -61,7 +61,7 @@ public class GifArgsBuilderTests
     [Fact]
     public void RenderPass_AppliesThePalette_AndLoopsForever()
     {
-        var args = GifArgsBuilder.RenderPass(Request(), @"C:\tmp\palette.png");
+        var args = GifArgsBuilder.RenderPass(Request(), @"C:\tmp\palette.png", @"C:\out.gif");
         var lavfi = args[args.ToList().IndexOf("-lavfi") + 1];
 
         Assert.Contains("paletteuse", lavfi, StringComparison.Ordinal);
@@ -73,7 +73,7 @@ public class GifArgsBuilderTests
     [Fact]
     public void RenderPass_SeeksBeforeTheInput_SoALongVideoIsNotDecodedFromZero()
     {
-        var args = GifArgsBuilder.RenderPass(Request(), @"C:\tmp\palette.png");
+        var args = GifArgsBuilder.RenderPass(Request(), @"C:\tmp\palette.png", @"C:\out.gif");
 
         var ss = args.ToList().IndexOf("-ss");
         var to = args.ToList().IndexOf("-to");
@@ -91,7 +91,7 @@ public class GifArgsBuilderTests
         // timeline, not a duration from the seek point. If RenderPass computed End-Start here, -to would
         // read "3" instead of "5" -- the render would trim a different, shorter window than the palette
         // was built from, and the GIF would silently cover the wrong slice of the source.
-        var args = GifArgsBuilder.RenderPass(Request(), @"C:\tmp\palette.png");
+        var args = GifArgsBuilder.RenderPass(Request(), @"C:\tmp\palette.png", @"C:\out.gif");
 
         Assert.Equal("2", args[args.ToList().IndexOf("-ss") + 1]);
         Assert.Equal("5", args[args.ToList().IndexOf("-to") + 1]);
@@ -106,7 +106,7 @@ public class GifArgsBuilderTests
         // the render trims another. This pins the actual invariant: same seek, both passes, always.
         var request = Request();
         var palette = GifArgsBuilder.PalettePass(request, @"C:\tmp\p.png");
-        var render = GifArgsBuilder.RenderPass(request, @"C:\tmp\p.png");
+        var render = GifArgsBuilder.RenderPass(request, @"C:\tmp\p.png", request.OutputPath);
 
         var paletteSs = palette[palette.ToList().IndexOf("-ss") + 1];
         var paletteTo = palette[palette.ToList().IndexOf("-to") + 1];
@@ -125,7 +125,7 @@ public class GifArgsBuilderTests
         foreach (var args in new[]
                  {
                      GifArgsBuilder.PalettePass(Request(), @"C:\tmp\p.png"),
-                     GifArgsBuilder.RenderPass(Request(), @"C:\tmp\p.png"),
+                     GifArgsBuilder.RenderPass(Request(), @"C:\tmp\p.png", @"C:\out.gif"),
                  })
         {
             Assert.DoesNotContain("-y", args);
@@ -142,12 +142,34 @@ public class GifArgsBuilderTests
         var request = Request(320, 180, 12);
         var paletteVf = GifArgsBuilder.PalettePass(request, @"C:\tmp\p.png")[
             GifArgsBuilder.PalettePass(request, @"C:\tmp\p.png").ToList().IndexOf("-vf") + 1];
-        var renderLavfi = GifArgsBuilder.RenderPass(request, @"C:\tmp\p.png")[
-            GifArgsBuilder.RenderPass(request, @"C:\tmp\p.png").ToList().IndexOf("-lavfi") + 1];
+        var renderLavfi = GifArgsBuilder.RenderPass(request, @"C:\tmp\p.png", request.OutputPath)[
+            GifArgsBuilder.RenderPass(request, @"C:\tmp\p.png", request.OutputPath).ToList().IndexOf("-lavfi") + 1];
 
         Assert.Contains("fps=12", paletteVf, StringComparison.Ordinal);
         Assert.Contains("scale=320:-2", paletteVf, StringComparison.Ordinal);
         Assert.Contains("fps=12", renderLavfi, StringComparison.Ordinal);
         Assert.Contains("scale=320:-2", renderLavfi, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BothPasses_UseTheExactRationalFrameRate_NotAThreeDecimalApproximation()
+    {
+        // 30000/1001 (29.97 fps) is the commonest source rate there is, and the DEFAULT selection
+        // besides -- the source always heads GifBounds' own list. Formatting FrameRate.Value to three
+        // decimals renders it "29.97", silently retiming every GIF made from such a source. Passing
+        // the exact rational (as the sibling NormalizeArgsBuilder already does) avoids that entirely.
+        var request = new GifRequest(
+            @"C:\in.mp4", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5),
+            new Resolution(480, 270), new FrameRate(30000, 1001), @"C:\out.gif");
+
+        var paletteVf = GifArgsBuilder.PalettePass(request, @"C:\tmp\p.png")[
+            GifArgsBuilder.PalettePass(request, @"C:\tmp\p.png").ToList().IndexOf("-vf") + 1];
+        var renderLavfi = GifArgsBuilder.RenderPass(request, @"C:\tmp\p.png", request.OutputPath)[
+            GifArgsBuilder.RenderPass(request, @"C:\tmp\p.png", request.OutputPath).ToList().IndexOf("-lavfi") + 1];
+
+        Assert.Contains("fps=30000/1001", paletteVf, StringComparison.Ordinal);
+        Assert.Contains("fps=30000/1001", renderLavfi, StringComparison.Ordinal);
+        Assert.DoesNotContain("29.97", paletteVf, StringComparison.Ordinal);
+        Assert.DoesNotContain("29.97", renderLavfi, StringComparison.Ordinal);
     }
 }

@@ -142,8 +142,41 @@ public partial class GifMakerViewModel : ObservableObject
 
     // ---- parameters -----------------------------------------------------------
 
-    [ObservableProperty] private Resolution _selectedSize = new(0, 0);
+    private Resolution _selectedSize = new(0, 0);
 
+    /// <summary>NULLABLE on purpose, and hand-written rather than <c>[ObservableProperty]</c>. A
+    /// ComboBox writes <c>null</c> through a two-way <c>SelectedItem</c> binding the instant its
+    /// <c>ItemsSource</c> no longer contains the current selection -- exactly what happens between
+    /// <see cref="LoadVideoAsync"/> replacing <see cref="Bounds"/> (which rebuilds the Size ComboBox's
+    /// items) and the very next line re-defaulting <see cref="SelectedSize"/> to the new source's own
+    /// size. <c>Resolution</c> is a reference type (a record CLASS, unlike <c>FrameRate</c>'s
+    /// <c>readonly record struct</c>), so that null write actually lands rather than failing a value-
+    /// type conversion WPF would silently swallow -- it used to reach <c>Recompute</c> and throw inside
+    /// <see cref="GifSizeEstimator.Estimate"/> on the UI thread, invisible because WPF's binding engine
+    /// swallows the exception (final whole-branch review, FIX 2; <c>MergerViewModel.SelectedResolution</c>
+    /// hit the identical bug first). Ignoring a null write here — keeping the last good selection —
+    /// is the fix; a null is never a real choice the user made.</summary>
+    public Resolution? SelectedSize
+    {
+        get => _selectedSize;
+        set
+        {
+            if (value is null || value == _selectedSize)
+            {
+                return;
+            }
+
+            _selectedSize = value;
+            OnPropertyChanged();
+            Recompute();
+        }
+    }
+
+    // NOT nullable, and deliberately not made symmetric with SelectedSize above: FrameRate is a
+    // `readonly record struct` (a VALUE type), so a ComboBox's null write fails the binding's type
+    // conversion before it ever reaches this setter -- WPF swallows that silently and the property is
+    // simply left holding its last value. There is no null to guard against here, and adding one would
+    // only be surface-level symmetry with no bug behind it.
     [ObservableProperty] private FrameRate _selectedFrameRate;
 
     [ObservableProperty] private string _startText = "";
@@ -164,8 +197,6 @@ public partial class GifMakerViewModel : ObservableObject
     /// <summary>The copy shown alongside <see cref="ShowSizeWarning"/>. A warning with no way out is
     /// just noise — name what the user can actually do about it.</summary>
     public string SizeWarningMessage => "Shorten the range, reduce the size, or lower the frame rate.";
-
-    partial void OnSelectedSizeChanged(Resolution value) => Recompute();
 
     partial void OnSelectedFrameRateChanged(FrameRate value) => Recompute();
 
@@ -246,8 +277,12 @@ public partial class GifMakerViewModel : ObservableObject
             return;
         }
 
+        // _selectedSize, not the nullable SelectedSize property: this runs only when RangeIsValid,
+        // which implies SourceLoaded, which implies LoadVideoAsync has already set a real size -- the
+        // backing field is never null in practice, and reading it directly avoids re-deriving that
+        // guarantee at every call site.
         var request = new GifRequest(
-            SourcePath, ParsedStart!.Value, ParsedEnd!.Value, SelectedSize, SelectedFrameRate, OutputPath);
+            SourcePath, ParsedStart!.Value, ParsedEnd!.Value, _selectedSize, SelectedFrameRate, OutputPath);
         var estimate = GifSizeEstimator.Estimate(request, _profiles.Load());
 
         EstimateText = estimate.Describe();
@@ -310,8 +345,10 @@ public partial class GifMakerViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanCreate))]
     public async Task CreateAsync()
     {
+        // _selectedSize, not the nullable SelectedSize property -- see UpdateEstimate's comment.
+        // CanCreate already requires SourceLoaded, so the backing field is a real, non-null selection.
         var request = new GifRequest(
-            SourcePath, ParsedStart!.Value, ParsedEnd!.Value, SelectedSize, SelectedFrameRate, OutputPath);
+            SourcePath, ParsedStart!.Value, ParsedEnd!.Value, _selectedSize, SelectedFrameRate, OutputPath);
 
         _cancellation = new CancellationTokenSource();
         IsRendering = true;

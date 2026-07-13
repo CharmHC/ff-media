@@ -54,8 +54,10 @@ public sealed record GifBounds(
                 continue; // never offer a step at or above the source: that is the upscaling we forbid
             }
 
+            // No `candidate.Height >= 2` guard here: ToEven already floors to Math.Max(2, ...), so the
+            // height can never be less than 2 and the guard could never be false.
             var candidate = new Resolution(ToEven(step), ToEven((int)Math.Round(step / aspect)));
-            if (candidate.Height >= 2 && !ladder.Contains(candidate))
+            if (!ladder.Contains(candidate))
             {
                 ladder.Add(candidate);
             }

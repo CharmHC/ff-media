@@ -1,4 +1,5 @@
 using System.Globalization;
+using FFMedia.Media;
 using FFMedia.Tools.GifMaker.Models;
 
 namespace FFMedia.Tools.GifMaker.Services;
@@ -45,10 +46,15 @@ public static class GifArgsBuilder
     }
 
     /// <summary>Pass 2 — render the GIF through that palette.</summary>
-    public static IReadOnlyList<string> RenderPass(GifRequest request, string palettePath)
+    /// <param name="outputPath">Where ffmpeg actually writes. NOT necessarily
+    /// <c>request.OutputPath</c> — <c>GifService</c> renders to a temporary sibling and only moves it
+    /// onto the real destination once it has been verified, so a failed or cancelled render never
+    /// costs the user the GIF that was already sitting there (final whole-branch review, FIX 1).</param>
+    public static IReadOnlyList<string> RenderPass(GifRequest request, string palettePath, string outputPath)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(palettePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
         return
         [
@@ -58,7 +64,7 @@ public static class GifArgsBuilder
             "-i", palettePath,
             "-lavfi", $"{Chain(request)}[x];[x][1:v]{PaletteUseOptions}",
             "-loop", "0", // 0 = loop forever, which is what a GIF is for
-            request.OutputPath,
+            outputPath,
         ];
     }
 
@@ -66,13 +72,16 @@ public static class GifArgsBuilder
     /// coincidence — see the type's remarks.
     ///
     /// <para><c>-2</c> rather than <c>-1</c>: derive the height from the source aspect AND force it
-    /// even.</para></summary>
+    /// even.</para>
+    ///
+    /// <para><b>The frame rate is the exact rational</b> (<see cref="FrameRate.ToFfmpegString"/>), not
+    /// <see cref="FrameRate.Value"/> formatted to three decimals. The commonest source rate of all —
+    /// 30000/1001, and the DEFAULT selection besides, since the source heads <c>GifBounds</c>' own
+    /// list — rounds to "29.97" under three decimals, silently retiming every GIF made from it. The
+    /// sibling <c>NormalizeArgsBuilder</c> already uses the rational for the same reason.</para></summary>
     private static string Chain(GifRequest request)
-        => $"fps={Rate(request.Fps.Value)},scale={request.Size.Width}:-2:flags=lanczos";
+        => $"fps={request.Fps.ToFfmpegString()},scale={request.Size.Width}:-2:flags=lanczos";
 
     private static string Seconds(TimeSpan value)
         => value.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
-
-    private static string Rate(double value)
-        => value.ToString("0.###", CultureInfo.InvariantCulture);
 }

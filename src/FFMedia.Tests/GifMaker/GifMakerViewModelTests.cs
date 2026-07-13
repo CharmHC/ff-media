@@ -232,6 +232,45 @@ public class GifMakerViewModelTests
         Assert.All(h.Vm.Bounds.FrameRates, rate => Assert.True(rate.Value <= 30));
     }
 
+    [Fact]
+    public async Task SelectedSize_IgnoresANullWrite_LikeAComboBoxPushesWhileItsItemsSourceIsRebuilding()
+    {
+        // FIX 2 (final whole-branch review). Resolution is a REFERENCE type (a record class, unlike
+        // FrameRate's `readonly record struct`), so a ComboBox really can write null through a two-way
+        // SelectedItem binding the instant its ItemsSource no longer contains the current selection --
+        // exactly what happens between LoadVideoAsync replacing Bounds and its own next line
+        // re-defaulting SelectedSize. There is no real WPF ComboBox in a headless test, so the write is
+        // simulated directly. Before the fix this reached Recompute() and threw a NullReferenceException
+        // inside GifSizeEstimator -- on the UI thread, silently swallowed by WPF's binding engine.
+        var h = await BuildLoadedAsync(width: 1920, height: 1080, fps: 30, seconds: 10);
+        var before = h.Vm.SelectedSize;
+
+        var exception = Record.Exception(() => h.Vm.SelectedSize = null);
+
+        Assert.Null(exception);
+        Assert.Equal(before, h.Vm.SelectedSize); // the null write is ignored -- the last good selection survives
+        Assert.False(string.IsNullOrEmpty(h.Vm.EstimateText)); // Recompute() was never disturbed by the null
+    }
+
+    [Fact]
+    public async Task LoadVideoAsync_ASecondVideoWithADifferentResolution_ReDefaultsWithoutThrowing()
+    {
+        // The exact scenario the reviewer found: loading a second video whose resolution differs from
+        // the first rebuilds Bounds (and so the Size ComboBox's ItemsSource) with the first video's
+        // resolution no longer in the list. If SelectedSize were still a plain non-nullable Resolution
+        // property (no null-tolerant projection), a real ComboBox pushing null in that instant would
+        // have crashed Recompute() with a NullReferenceException.
+        var h = await BuildLoadedAsync(width: 1920, height: 1080, fps: 30, seconds: 10);
+        h.Analyzer.Returns(@"C:\second.mp4", Info(width: 1280, height: 720, fps: 24, seconds: 8));
+
+        var exception = await Record.ExceptionAsync(() => h.Vm.LoadVideoAsync(@"C:\second.mp4"));
+
+        Assert.Null(exception);
+        Assert.Equal(new Resolution(1280, 720), h.Vm.SelectedSize);
+        Assert.Equal(new FrameRate(24, 1), h.Vm.SelectedFrameRate);
+        Assert.False(string.IsNullOrEmpty(h.Vm.EstimateText));
+    }
+
     // ---- the estimate ----------------------------------------------------------
 
     [Fact]
