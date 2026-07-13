@@ -58,4 +58,57 @@ public class TrimParsingTests
     {
         Assert.Null(TrimParsing.ParseRange(start, end));
     }
+
+    [Theory]
+    [InlineData("1:23.45", 83.45)]
+    [InlineData("0:05.5", 5.5)]
+    [InlineData("1:02:03.25", 3723.25)]
+    [InlineData("0:00.1", 0.1)]
+    public void TryParse_AcceptsAFractionalSecondInTheColonForm(string text, double expectedSeconds)
+    {
+        // THE WHOLE POINT OF M9. A capture button reads the player's position -- 1:23.45 -- and writes
+        // it here. Before this, the colon form parsed each part with int.TryParse, so this returned
+        // NULL: the range went invalid and Create greyed out. The feature was broken on arrival.
+        var parsed = CoreTrimParsing.TryParse(text);
+
+        Assert.NotNull(parsed);
+        Assert.Equal(expectedSeconds, parsed!.Value.TotalSeconds, 3);
+    }
+
+    [Theory]
+    [InlineData("1:60.5")]   // 60 seconds is not a second
+    [InlineData("1:-3.5")]
+    [InlineData("1:2:3:4.5")]
+    [InlineData("1:aa.5")]
+    public void TryParse_StillRejectsNonsense(string text)
+        => Assert.Null(CoreTrimParsing.TryParse(text));
+
+    [Theory]
+    [InlineData(0, "0:00")]
+    [InlineData(83, "1:23")]
+    [InlineData(83.45, "1:23.45")]
+    [InlineData(3723.25, "1:02:03.25")]
+    [InlineData(0.5, "0.5")]
+    public void Format_RendersATimestampAHumanRecognises(double seconds, string expected)
+        => Assert.Equal(expected, CoreTrimParsing.Format(TimeSpan.FromSeconds(seconds)));
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.25)]
+    [InlineData(7.125)]
+    [InlineData(83.45)]
+    [InlineData(3723.25)]
+    [InlineData(5999.999)]
+    public void Format_RoundTripsThroughTryParse_ToTheSameInstant(double seconds)
+    {
+        // THE INVARIANT. Capture formats a position into the box; the tool parses it straight back out
+        // to build the request. If those two disagreed by even a little, the GIF would be cut somewhere
+        // other than where the user saw -- silently.
+        var original = TimeSpan.FromSeconds(seconds);
+
+        var round = CoreTrimParsing.TryParse(CoreTrimParsing.Format(original));
+
+        Assert.NotNull(round);
+        Assert.Equal(original.TotalMilliseconds, round!.Value.TotalMilliseconds, 0);
+    }
 }
