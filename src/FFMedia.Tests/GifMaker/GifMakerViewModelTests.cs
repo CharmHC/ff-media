@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FFMedia.Core.History;
 using FFMedia.Core.Media;
 using FFMedia.Core.Notifications;
@@ -203,6 +204,23 @@ public class GifMakerViewModelTests
     }
 
     [Fact]
+    public async Task LoadVideoAsync_ForASubSecondVideo_StillDefaultsToAValidWholeVideoRange()
+    {
+        // m:ss truncates to whole seconds, so a naive formatter renders BOTH the default start (0)
+        // and the default end (anything under 1s) as "0:00" -- an invalid zero-length range on load,
+        // for the shortest of clips. The end must round-trip to the real (fractional) duration.
+        var h = Build();
+        h.Analyzer.Returns(VideoPath, Info(seconds: 0.6));
+
+        await h.Vm.LoadVideoAsync(VideoPath);
+
+        Assert.NotEqual(h.Vm.StartText, h.Vm.EndText);
+        Assert.Equal(TimeSpan.Zero, TrimParsing.TryParse(h.Vm.StartText));
+        Assert.Equal(TimeSpan.FromSeconds(0.6), TrimParsing.TryParse(h.Vm.EndText));
+        Assert.True(h.Vm.CanCreate);
+    }
+
+    [Fact]
     public async Task Bounds_NeverOfferASizeOrRateAboveTheSource()
     {
         var h = Build();
@@ -316,8 +334,16 @@ public class GifMakerViewModelTests
         h.Vm.EndText = "0:08";
         Assert.True(h.Vm.CanCreate);
 
+        // The range is fine here -- CanCreate is false purely because the file name is blank. A
+        // disabled Create button must still say why, whichever input caused it; before this fix,
+        // RangeHint stayed "" in exactly this state and the page would have shown nothing at all.
         h.Vm.OutputFileName = "";
         Assert.False(h.Vm.CanCreate);
+        Assert.False(string.IsNullOrWhiteSpace(h.Vm.RangeHint));
+
+        h.Vm.OutputFileName = "clip.gif";
+        Assert.True(h.Vm.CanCreate);
+        Assert.True(string.IsNullOrWhiteSpace(h.Vm.RangeHint));
     }
 
     // ---- creating -----------------------------------------------------------
@@ -428,10 +454,14 @@ public class GifMakerViewModelTests
         Assert.NotEqual(h.Vm.Bounds.FrameRates[^1], request.Fps);
 
         // And the HISTORY ROW must name the file that was actually written -- not the mutated name a
-        // live re-read would now describe.
+        // live re-read would now describe. Title is checked too: it used to read the LIVE
+        // OutputFileName property rather than the snapshot, so the row's displayed NAME could disagree
+        // with the OutputPath it actually points at -- the same bug the merger shipped, one field over.
         var entry = Assert.Single(h.History.Entries);
         Assert.Equal(clickTimeOutputPath, entry.OutputPath);
         Assert.DoesNotContain("after.gif", entry.OutputPath, StringComparison.Ordinal);
+        Assert.Equal("before.gif", entry.Title);
+        Assert.NotEqual("after.gif", entry.Title);
     }
 
     [Fact]
@@ -510,6 +540,23 @@ public class GifMakerViewModelTests
     {
         var h = await BuildLoadedAsync(seconds: 10);
         h.History.AppendThrows = new IOException("history.json is locked");
+
+        await h.Vm.CreateCommand.ExecuteAsync(null);
+
+        Assert.Contains(h.Notifications.Sent, n => n.Severity == NotificationSeverity.Success);
+        Assert.DoesNotContain(h.Notifications.Sent, n => n.Severity == NotificationSeverity.Error);
+        Assert.Contains(h.Notifications.Sent, n => n.Severity == NotificationSeverity.Warning);
+    }
+
+    [Fact]
+    public async Task AHistorySinkThatThrowsJsonException_DoesNotReportAGoodGifAsFailed()
+    {
+        // JsonStore<T>.Load treats a JsonException as the same class of "broken store" as IOException/
+        // UnauthorizedAccessException -- Append's own serializer can throw one too, and it must be
+        // caught here for the same reason: the GIF is already rendered and verified, so a history
+        // write failing must never turn into a red "GIF creation failed".
+        var h = await BuildLoadedAsync(seconds: 10);
+        h.History.AppendThrows = new JsonException("unexpected end of JSON");
 
         await h.Vm.CreateCommand.ExecuteAsync(null);
 

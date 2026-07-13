@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FFMedia.Core.History;
@@ -217,7 +218,24 @@ public partial class GifMakerViewModel : ObservableObject
     /// find out).</summary>
     private bool RangeIsValid => EvaluateRange().IsValid;
 
-    private void UpdateRangeHint() => RangeHint = EvaluateRange().Hint;
+    /// <summary>The range's own hint takes priority; once the range itself is fine, an empty output
+    /// file name is the other way <see cref="CanCreate"/> can be false, and it deserves the same
+    /// explanation — a disabled Create button with nothing said is a dead end whichever input caused
+    /// it (see Finding 3, the "range hint" pre-existed this and the filename case was falling through
+    /// to silence).</summary>
+    private void UpdateRangeHint()
+    {
+        var range = EvaluateRange();
+        if (!range.IsValid)
+        {
+            RangeHint = range.Hint;
+            return;
+        }
+
+        RangeHint = string.IsNullOrWhiteSpace(OutputFileName)
+            ? "Enter a file name for the GIF."
+            : "";
+    }
 
     private void UpdateEstimate()
     {
@@ -259,11 +277,7 @@ public partial class GifMakerViewModel : ObservableObject
 
     public string OutputPath => Path.Combine(OutputFolder, OutputFileName);
 
-    partial void OnOutputFileNameChanged(string value)
-    {
-        OnPropertyChanged(nameof(CanCreate));
-        CreateCommand.NotifyCanExecuteChanged();
-    }
+    partial void OnOutputFileNameChanged(string value) => Recompute();
 
     // ---- rendering --------------------------------------------------------------
 
@@ -366,7 +380,7 @@ public partial class GifMakerViewModel : ObservableObject
         try
         {
             _history.Append(new HistoryEntry(
-                Title: Path.GetFileName(OutputFileName),
+                Title: Path.GetFileName(outputPath),
                 Url: "", // a GIF made from a local video has no URL
                 OutputPath: outputPath,
                 Format: string.Create(
@@ -376,7 +390,7 @@ public partial class GifMakerViewModel : ObservableObject
                 Status: "Completed",
                 Source: HistorySource.Gif));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             _notifications.Notify(new Notification(
                 "History not updated",
@@ -412,8 +426,15 @@ public partial class GifMakerViewModel : ObservableObject
     /// <summary>m:ss, or h:mm:ss past an hour. Invariant — this is a duration, not a local time. Also
     /// round-trips through <see cref="TrimParsing.TryParse"/>, since it is used to seed
     /// <see cref="StartText"/>/<see cref="EndText"/>.</summary>
-    private static string FormatTime(TimeSpan span)
-        => span.ToString(span.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
+    /// <remarks>Below one second, <c>m\:ss</c> truncates to <c>"0:00"</c> — for a source under a
+    /// second long, that gives the SAME text for both the default start and the default end, which
+    /// then fails the <c>end &lt;= start</c> check: the range defaults to invalid the moment the
+    /// source itself is very short. Below one second, format as plain fractional seconds instead
+    /// (<see cref="TrimParsing.TryParse"/> already accepts that form) so the end text always
+    /// round-trips to the source's real duration rather than being floored away.</remarks>
+    private static string FormatTime(TimeSpan span) => span > TimeSpan.Zero && span.TotalSeconds < 1
+        ? span.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+        : span.ToString(span.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
 
     /// <summary>Reports on the calling thread. See <c>MergerViewModel</c>'s equivalent for why the BCL
     /// <see cref="Progress{T}"/> is wrong here (it marshals to the captured context, reordering
