@@ -115,6 +115,14 @@ public class MediaElementPlayerTests
         Assert.Equal(0, opened);
     }
 
+    // NOT TESTED, deliberately: that Attach() CLOSES the discarded element (so a preview the user left
+    // playing does not go on playing, audibly, from a page they navigated away from -- and so it releases
+    // its handle on the proxy file, which an abandoned element would otherwise hold open against
+    // SweepStale). Close() has NO observable public effect headlessly: it does not reset Source (checked --
+    // the element still reports file:///C:/video.mp4 afterwards), and with no Media Foundation session
+    // there is no playback state to read back. Any test here would pass whether or not the call is present.
+    // Verified by the human click-through instead: navigate away from a PLAYING preview and listen.
+
     /// <summary>A freshly-attached element has not been told to play. Leaving <c>IsPlaying</c> true across
     /// a re-attach would show the transport as playing over an element that is doing nothing.
     ///

@@ -98,7 +98,9 @@ public sealed class MediaElementPlayer : IMediaPlayer
     /// <para>The old element's handlers are unhooked FIRST. It stays alive until the visual tree lets it
     /// go, and Media Foundation can still answer on it — an answer that would otherwise fire into this
     /// singleton's <see cref="MediaOpened"/>/<see cref="MediaFailed"/> and settle a load attempt belonging
-    /// to a different element entirely.</para></summary>
+    /// to a different element entirely. Then it is CLOSED: <c>LoadedBehavior = Manual</c> means nothing else
+    /// will stop it, so a preview left playing would go on playing — audible — from a page the user has
+    /// already navigated away from. Its position is read before either step, since closing resets it.</para></summary>
     public void Attach(MediaElement element)
     {
         ArgumentNullException.ThrowIfNull(element);
@@ -109,6 +111,7 @@ public sealed class MediaElementPlayer : IMediaPlayer
             resumeAt = _element.Position;
             _element.MediaOpened -= OnElementMediaOpened;
             _element.MediaFailed -= OnElementMediaFailed;
+            _element.Close();
         }
 
         _element = element;
