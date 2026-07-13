@@ -41,14 +41,19 @@ review, not starting new work.
   `FFMedia.Media`, `TrimParsing.TryParse` → `FFMedia.Core.Media`), `GifBounds`, `GifArgsBuilder`'s two
   passes, the calibrated size estimate, `GifService` (preflight → two passes → re-probe → cleanup),
   `GifMakerViewModel`, the page + `ITool` + DI + tooltips, and the real-ffmpeg integration test.
-- **Open PR:** **not yet opened at hand-off of the doc-sync task** — check `gh pr list` / `gh pr view`
-  for `feat/m8-gif-maker` before assuming its state; the controller that ran this task's steps 1–4 was
-  told to leave the push/PR (step 5) to whoever runs next.
-- **Verified this session:** Release build **0 warnings / 0 errors**; **722/722** unit tests
+- **Open PR:** **#27** — `feat/m8-gif-maker` → `main`. Awaiting the user's review and merge (Rule 3).
+- **Verified this session:** Release build **0 warnings / 0 errors**; **730/730** unit tests
   (`Category!=Integration`); **11/11** integration tests (4 merge + 1 gif + 6 pre-existing queue/yt-dlp,
   all unaffected). The new `GifIntegrationTests` test proves the two claims most likely to regress
   silently: `-to` is **absolute** on the source timeline (a `-ss 2 -to 5` GIF really is 3.0 s, not 5.0 s),
   and the output height really is derived from source aspect (270, never a hand-set 102-style value).
+- **⚠️ The whole-branch review then caught a CRITICAL data-loss bug that every individual task review had
+  passed:** the render wrote **straight to the destination** and deleted it on cancel/failure, so
+  cancelling a re-render **destroyed the good GIF the user had made a minute before** — and this tool's
+  entire workflow is re-rendering to the same filename until the size is small enough. The suite was green
+  because **it pinned the destructive behaviour as correct**. Fixed by the merger's sibling-write rule.
+  Read the top Progress Log entry before touching `GifService` — it is the most important thing on this
+  branch.
 - **Not verified: a human has not clicked through the GIF Maker page.** This dev environment is
   headless. Worth flagging specifically for that click-through: the page's two `DynamicResource`
   lookups fail **silently** on a typo (unlike `StaticResource`, which throws at load), so nothing in the
@@ -77,6 +82,63 @@ actually land for a casual reader.
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-13 — M8 whole-branch review: the merger's data-loss bug, un-relearned
+
+- **The bug worth remembering — every task passed its own review, and the composition was still
+  destructive.** `GifService` wrote the render **straight to `request.OutputPath`** and deleted that path
+  on cancel, render-failure and verify-failure — and `FfmpegRunner` prepends **`-y`**, so the render also
+  **truncated whatever was already there** the instant it opened it. Harmless in a vacuum; catastrophic
+  given what this tool *is*. The GIF Maker's whole workflow is **iterative**: load once, tune,
+  **re-render to the same filename**, look, tune again. So the ordinary path — *make a GIF → it's 8 MB,
+  too big to send → drop the size → re-render → hit **Cancel** because it's slow* — **deleted the good
+  GIF from sixty seconds earlier, leaving the user with neither.** Cancelling during the *palette* pass
+  destroyed a file ffmpeg had **never even opened**.
+- **Why no per-task review could catch it, which is the whole argument for the final one.** Task 5 built
+  `GifService` against fakes; Tasks 6–7 built the UI that makes same-filename re-rendering the *default
+  gesture*. Neither task alone ever shows you a user who **already has** a `clip.gif`. This is the second
+  milestone running where each task was individually correct and the *whole* was broken (M7: the clip
+  list stayed editable during a merge).
+- **And the suite was green because it pinned the bug as correct.** `GifServiceTests` asserted the
+  destination was **gone** after a cancel — and **no test ever placed a pre-existing file there**, so
+  nothing could distinguish *"cleaned up its own half-written GIF"* (the intent) from *"deleted the
+  user's finished GIF"* (the behaviour). Three tests were **inverted**: they now put a real GIF at the
+  destination and assert it **survives byte-for-byte**. *A test that encodes the bug is worse than no
+  test — it actively defends it.*
+- **The fix is the merger's, which was sitting one project over the whole time.** Render to a **sibling**
+  (same directory, so `File.Move` is a free rename; same `.gif` extension, since ffmpeg picks its muxer
+  from it), verify **that**, and only move a proven-whole GIF into place. **Nothing the user already had
+  is touched until we have something worth replacing it with.** CLAUDE.md has recorded that sentence
+  since M7. It did not stop us doing it again — *a lesson written down is not a lesson applied.*
+- **Three more the composition hid:**
+  1. **The re-probe only half-existed.** `VerifyAsync` checked exists / non-empty / readable / has a video
+     stream — but **never the duration**. So a GIF ffmpeg wrote **short** (a filtergraph that dies after
+     the first frame, a truncated write) probed clean and was reported a **success**. The re-probe proved
+     *"a file came out"*, not *"the file I asked for came out"* — and *"ffmpeg exits 0 having silently
+     produced less than you asked for"* is **exactly** the failure this project already shipped via the
+     concat demuxer. The tolerance is **proportional** (15 %, floor 0.5 s, clamped to half the request),
+     because a false positive here **deletes a healthy GIF** — the trap the merger's flat 1 s tolerance
+     hit.
+  2. **`SelectedSize` was a non-nullable `Resolution`** — a `record`, therefore a **reference type** —
+     two-way bound to a `ComboBox.SelectedItem`. **WPF writes `null` through that binding while
+     `ItemsSource` rebuilds**, so loading a **second** video threw a `NullReferenceException` inside the
+     estimator, on the UI thread, **silently swallowed by the binding engine**. Invisible only because
+     **no test ever loaded two videos**. This is verbatim the M7 lesson (*"the null a ComboBox pushes
+     while its ItemsSource is being rebuilt"*) — and `MergerViewModel` already had the nullable
+     projection that fixes it.
+  3. **A missing output folder was reported as *"The video could not be found."*** Nothing created the
+     destination directory, so ffmpeg failed with *"No such file or directory"*, which `GifErrors` matched
+     on its **first** rule — **blaming the user's perfectly good `.mp4` for a typo'd destination folder.**
+     Word for word the M7 mistake (blaming a good mp4 for a missing binary). Also: the final `File.Move`
+     was **unguarded**, so a destination held open by another process — *the user is very likely looking
+     at the GIF they just made* — orphaned the pending render **in the user's own output folder**.
+- **Verified:** Release build **0 warnings / 0 errors**; **730/730** unit tests; **11/11** integration
+  tests against real ffmpeg (the 4 merge tests unaffected). Every fix is **mutation-proven** — reverting
+  it fails the test that claims to catch it.
+- **Not verified:** **a human has not clicked through the page.** This environment is headless. Worth
+  knowing for that click-through: the page's two **`DynamicResource`** lookups **fail silently** on a
+  typo (unlike `StaticResource`, which throws at load), so no test covers them.
+- **Next:** user reviews PR. SDD → **v0.25**.
 
 ### 2026-07-13 — M8 GIF Maker: real-ffmpeg proof + doc sync — **M8 complete**
 
