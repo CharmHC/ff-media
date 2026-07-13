@@ -33,55 +33,86 @@ milestones. Read it before making design decisions.
 
 ## ▶️ RESUME HERE (next session)
 
-**M8 (GIF Maker) is implemented, proven against real ffmpeg, and awaiting the user's PR review and
-merge.** Nothing is queued to execute — the next session's job is almost certainly reacting to that
-review, not starting new work.
+**M8 (GIF Maker) is MERGED** (PR #27 → `main` @ `6465c61`). **M9 is designed and awaiting spec review.**
 
-- **Branch:** `feat/m8-gif-maker`. All 8 plan tasks are done: the promotions (`Resolution` →
-  `FFMedia.Media`, `TrimParsing.TryParse` → `FFMedia.Core.Media`), `GifBounds`, `GifArgsBuilder`'s two
-  passes, the calibrated size estimate, `GifService` (preflight → two passes → re-probe → cleanup),
-  `GifMakerViewModel`, the page + `ITool` + DI + tooltips, and the real-ffmpeg integration test.
-- **Open PR:** **#27** — `feat/m8-gif-maker` → `main`. Awaiting the user's review and merge (Rule 3).
-- **Verified this session:** Release build **0 warnings / 0 errors**; **730/730** unit tests
-  (`Category!=Integration`); **11/11** integration tests (4 merge + 1 gif + 6 pre-existing queue/yt-dlp,
-  all unaffected). The new `GifIntegrationTests` test proves the two claims most likely to regress
-  silently: `-to` is **absolute** on the source timeline (a `-ss 2 -to 5` GIF really is 3.0 s, not 5.0 s),
-  and the output height really is derived from source aspect (270, never a hand-set 102-style value).
-- **⚠️ The whole-branch review then caught a CRITICAL data-loss bug that every individual task review had
-  passed:** the render wrote **straight to the destination** and deleted it on cancel/failure, so
-  cancelling a re-render **destroyed the good GIF the user had made a minute before** — and this tool's
-  entire workflow is re-rendering to the same filename until the size is small enough. The suite was green
-  because **it pinned the destructive behaviour as correct**. Fixed by the merger's sibling-write rule.
-  Read the top Progress Log entry before touching `GifService` — it is the most important thing on this
-  branch.
-- **Not verified: a human has not clicked through the GIF Maker page.** This dev environment is
-  headless. Worth flagging specifically for that click-through: the page's two `DynamicResource`
-  lookups fail **silently** on a typo (unlike `StaticResource`, which throws at load), so nothing in the
-  test suite would catch a broken one — only eyes on the running page would.
-- **Bugs the review rounds on this branch found, worth knowing before touching this code again:** the
-  re-probe (the entire reason `GifService` exists) was, for a while, pinned by *nothing*, because the
-  fake analyzer used by its own test failed on every path rather than only the output; the merger's
-  "no freeze guard during a running job" bug reappeared twice in `GifMakerViewModel` (a video-swap
-  mid-render, and a history `Title` reading the live property instead of a snapshot); and
-  `gif-size.json`'s `JsonStore` quarantines malformed JSON but not semantically-invalid values, so a
-  hand-edited negative sample count divided by zero and persisted a `NaN`. See the 2026-07-13 Progress
-  Log entry below for the full account of each.
-
-*(PR #25, the delta-package fix, was merged — `main` @ `628bfcc`. `release.yml` now runs
-`vpk download github` before packing, so the **next** release will be the first to ship a delta:
-~19 MB instead of ~190 MB. That has not been exercised by a real tag yet; the workflow raises a CI
-**warning** if no delta is produced, so watch for it.)*
-
-**Still not verified by a human, from earlier work** — worth a click-through when convenient: the merger
-page's clip-list **column alignment** (`Grid.IsSharedSizeScope` is the right mechanism, but alignment is
-a *pixel* claim only eyes settle), the **pin toggle**, and whether the new **plain-English tooltips**
-actually land for a casual reader.
+- **Spec:** [`docs/superpowers/specs/2026-07-13-m9-video-preview-design.md`](docs/superpowers/specs/2026-07-13-m9-video-preview-design.md)
+  — **Video Preview & Frame Capture.** Play/pause/seek/frame-step a video, then **‹ Set Start / Set End ›**
+  captures the paused frame's timestamp into the tool's range. Ends **blind timecode entry**. Shared, in a
+  new **`FFMedia.Ui`** layer; **first consumer is the GIF Maker**.
+- **Next step:** user reviews the spec → then `superpowers:writing-plans` for the implementation plan.
+  **No code has been written for M9.** Delivered via branch `docs/m9-video-preview` → PR.
+- **Two things the spec settled that you must not re-derive:** (1) WPF's `MediaElement` **cannot play
+  VP9/WebM** (verified against real files; MP4/MKV H.264 both open) — and **WebM is a format our own
+  downloader produces**, so the design is *fast path + ffmpeg proxy fallback*, and the proxy **rescales
+  only, never re-times** (a drifted timeline makes every captured timestamp a lie). (2)
+  **`TrimParsing.TryParse` rejects `1:23.45`** — the colon form parses each part with `int.TryParse` — so
+  capture would write an unparseable value and grey out Create until this is fixed.
+- **Repo state:** `main` green — Release build **0 warnings / 0 errors**, **730/730** unit tests, **11/11**
+  integration tests vs real ffmpeg. Latest release **v1.1.1**.
+- **Still unverified by a human** (worth a click-through when convenient): the **GIF Maker page** — layout,
+  drag-and-drop, dark-mode rendering, and whether the tooltips land. Its two `DynamicResource` lookups
+  **fail silently** on a typo (unlike `StaticResource`, which throws at load), so no test covers them.
+- **Deferred M8 minors**, logged for triage: the progress bar stalls during the palette pass (palettegen
+  emits one `out_time` line); `_profiles.Load()` runs a sync JSON read **per keystroke**; nothing enforces
+  a `.gif` extension on the output name; no sweeper for stranded `palette-*.png`; spec §6.1's disk-space
+  guard was silently dropped; `GifErrors`' stderr strings are unverified against real ffmpeg.
 
 ---
 
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-13 — M9 designed: Video Preview & Frame Capture (spec only, no code)
+
+- **Done:** specced **M9** → [`docs/superpowers/specs/2026-07-13-m9-video-preview-design.md`](docs/superpowers/specs/2026-07-13-m9-video-preview-design.md).
+  The user asked to **preview the video, pause it, and capture the current frame's timestamp** as
+  Start or End. Every tool here asks for a moment in a video as **blind timecode text** — you type
+  `1:23` and hope. **§19 had already reached the same conclusion from the other side**, recording it
+  as the reason the merger's per-clip trim was deferred: *"needs a preview scrubber to be usable, not
+  blind timecode entry."* So this is a **shared** capability, not a GIF Maker feature — new
+  **`FFMedia.Ui`** layer (a tool must never reference another tool, and cannot reference the WinExe
+  either). Building it shared **now** means M10 *adopts* it instead of doing a promotion task, the way
+  `Resolution`/`TrimParsing` had to in M8.
+- **The finding that decides the whole design — and I tested it instead of assuming.** WPF's
+  `MediaElement` renders through **Windows Media Foundation**, so its codec support is *Windows'*, not
+  ours. Hosted a real `MediaElement` on an STA thread with a real message loop: **MP4/H.264 ✅,
+  MKV/H.264 ✅, WebM/VP9 ❌ `MediaFailed`.** **WebM is a format our own downloader produces** (M2) — so
+  pointing `MediaElement` at the source and calling it done would show a **blank preview for videos
+  FFMedia itself made.** Hence **fast path + proxy fallback**: play the source; if it fails, transcode
+  a small H.264 proxy and play that. That is the merger's **`ConformanceCheck` discipline reused** —
+  conforming input takes the fast path, non-conforming gets normalized — costing nothing for videos
+  that already play, and correct for everything ffmpeg can read.
+- **My first run of that test said the opposite** (MKV opened, MP4 timed out) because a busy-wait loop
+  starved the dispatcher. That was a **broken harness, not evidence**, and I threw it away and rebuilt
+  it with a real message loop. **Bad evidence is worse than none** — it would have "proven" a false
+  premise and shaped the whole milestone around it.
+- **The proxy's one hard rule: it rescales, it never re-times.** The captured timestamp is read from
+  the *player's* position, so a proxy whose timeline drifted from the source's by even a little would
+  make **every captured time a lie** — the GIF cut somewhere other than where the user saw. No `-r`,
+  no `-ss`, no `-t`, no frame-dropping filter. An integration test pins it: a WebM/VP9 source must
+  yield a proxy whose duration equals the source's within a frame.
+- **The second finding — the feature would have been broken on arrival.**
+  **`TrimParsing.TryParse` rejects `1:23.45`**: the bare-seconds form goes through `double.TryParse`
+  (so `83.45` works), but the **colon form parses each part with `int.TryParse`**. So a capture button
+  writing `1:23.45` into the Start box produces an **unparseable** value → the range goes invalid →
+  **Create greys out.** (M8's Task 6 report claimed *"`TryParse` already accepts fractional-seconds
+  text"* — true only of the bare form, and the half that is false is exactly the half capture needs.)
+  And the GIF Maker's `FormatTime` renders `m\:ss`, **truncating to whole seconds** — so even a
+  parseable capture would silently lose up to a second, in a tool whose entire job is picking an exact
+  moment. `TryParse` gains fractional support in the colon form, plus a round-trippable `Format`.
+- **Applied M8's lesson without being asked:** the capture buttons **freeze while a GIF is rendering**
+  (the render holds a *snapshot*), gated **both** by `CanExecute` **and** inside the command — because
+  **a gesture that is not a command bypasses `CanExecute` entirely.** That bug shipped **twice** in M8.
+- **Scope cut, at the user's call:** the **draggable range band** (a real custom control) moves to
+  **M10**, along with rollout to the Merger and Downloader. M9 ships the two capture buttons on
+  plumbing that M10 can then build on.
+- **Also:** §17's **M6 row still said "🚧 in progress"** — through **four shipped releases** (v1.0.0 →
+  v1.1.1). Corrected. *A roadmap that lags reality is not a stale note; it is a false claim.*
+- **Verified:** the `MediaElement` codec matrix (against real synthesized files) and the `TrimParsing`
+  gap (by reading the code). **No build/tests run — documentation only, no code touched.**
+- **Next:** user reviews the spec → `writing-plans`. SDD → **v0.26**. Delivered via branch
+  `docs/m9-video-preview` → PR.
 
 ### 2026-07-13 — M8 whole-branch review: the merger's data-loss bug, un-relearned
 
