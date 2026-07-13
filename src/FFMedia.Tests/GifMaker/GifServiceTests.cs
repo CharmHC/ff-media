@@ -350,6 +350,32 @@ public class GifServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAsync_WhenTheDestinationCannotBeReplaced_FailsAndLeavesNoSiblingAndPreservesTheExistingGif()
+    {
+        // The final File.Move is unguarded no longer. This is the tool's core loop -- the user is very
+        // likely LOOKING at the GIF they just made (a viewer, a browser tab, Explorer's preview pane)
+        // while tuning the next render -- so the destination being held open by another process is not
+        // exotic. Prove the REAL behaviour (not a mocked File.Move): hold an exclusive lock on the
+        // destination for the duration of the call and let the real move attempt really fail.
+        var (service, _, _, _, request) = Build();
+        PlacePreExistingGif(request);
+
+        Result<string> result;
+        using (new FileStream(request.OutputPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            result = await service.CreateAsync(request);
+        }
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("could not be replaced", result.Error);
+        AssertPreExistingGifSurvives(request);
+
+        // The verified sibling must not become litter in the user's OWN output folder just because the
+        // move failed -- the only *.gif here is the pre-existing one, untouched.
+        Assert.Equal([request.OutputPath], Directory.GetFiles(_dir, "*.gif"));
+    }
+
+    [Fact]
     public async Task CreateAsync_WhenCancelled_ThePreExistingGifAtTheDestinationSurvives()
     {
         var (service, ffmpeg, _, _, request) = Build();

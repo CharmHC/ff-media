@@ -218,7 +218,24 @@ public sealed class GifService : IGifService
         // Verified whole. NOW it may take the destination -- whatever was there before (very likely an
         // earlier, GOOD render of this exact request; the workflow is "tune and re-render to the same
         // filename") survives right up until this instant.
-        File.Move(pendingOutput, request.OutputPath, overwrite: true);
+        //
+        // This is the tool's core loop, so the destination being open elsewhere is not exotic -- the
+        // user is very likely LOOKING at the GIF they just made (a viewer, a browser tab, Explorer's
+        // preview pane) while tuning the next render. On Windows that throws IOException here. The
+        // verified sibling must not become litter in the user's OWN output folder just because the move
+        // failed, and the message must name the real problem rather than surface the raw exception.
+        try
+        {
+            File.Move(pendingOutput, request.OutputPath, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            DeleteQuietly(pendingOutput);
+            return Result<string>.Failure(
+                "The GIF was rendered, but the file could not be replaced because something else has it open "
+                + "-- close anything showing it (a viewer, a browser tab, Explorer's preview pane) and try "
+                + "again, or choose a different file name.");
+        }
 
         RecordActualSize(request);
         return Result<string>.Success(request.OutputPath);
