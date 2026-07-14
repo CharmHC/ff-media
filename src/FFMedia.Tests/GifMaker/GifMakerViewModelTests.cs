@@ -124,8 +124,10 @@ public class GifMakerViewModelTests
 
         public event EventHandler? MediaOpened;
 
-#pragma warning disable CS0067 // This stub never simulates a failed open; IMediaPlayer still requires the event.
+#pragma warning disable CS0067 // This stub never fails an open or reaches the end; IMediaPlayer still requires the events.
         public event EventHandler<string>? MediaFailed;
+
+        public event EventHandler? MediaEnded;
 #pragma warning restore CS0067
 
         public void Open(string path)

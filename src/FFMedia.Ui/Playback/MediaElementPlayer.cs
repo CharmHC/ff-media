@@ -57,6 +57,8 @@ public sealed class MediaElementPlayer : IMediaPlayer
 
     public event EventHandler<string>? MediaFailed;
 
+    public event EventHandler? MediaEnded;
+
     public TimeSpan Position
     {
         get => _element?.Position ?? TimeSpan.Zero;
@@ -111,6 +113,7 @@ public sealed class MediaElementPlayer : IMediaPlayer
             resumeAt = _element.Position;
             _element.MediaOpened -= OnElementMediaOpened;
             _element.MediaFailed -= OnElementMediaFailed;
+            _element.MediaEnded -= OnElementMediaEnded;
             _element.Close();
         }
 
@@ -119,6 +122,7 @@ public sealed class MediaElementPlayer : IMediaPlayer
         _element.ScrubbingEnabled = true;
         _element.MediaOpened += OnElementMediaOpened;
         _element.MediaFailed += OnElementMediaFailed;
+        _element.MediaEnded += OnElementMediaEnded;
 
         // A fresh element is not playing, whatever the one it replaced was doing.
         IsPlaying = false;
@@ -150,6 +154,17 @@ public sealed class MediaElementPlayer : IMediaPlayer
     {
         _resumeTo = null;
         MediaFailed?.Invoke(this, e.ErrorException?.Message ?? "The player could not open this video.");
+    }
+
+    /// <summary>Playback ran off the end. Nothing else clears <see cref="IsPlaying"/> — Play() sets it,
+    /// Pause() clears it, and reaching the end is neither — so without this the player claimed to be
+    /// playing forever: a Pause button over a stopped video, and a 200 ms polling timer that never stops.
+    /// The element is NOT closed here: the user may well want to hit Play again, or step back a frame and
+    /// capture the last one.</summary>
+    private void OnElementMediaEnded(object? sender, RoutedEventArgs e)
+    {
+        IsPlaying = false;
+        MediaEnded?.Invoke(this, EventArgs.Empty);
     }
 
     public void Open(string path)

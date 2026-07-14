@@ -33,6 +33,8 @@ public class VideoPreviewViewModelTests
 
         public event EventHandler<string>? MediaFailed;
 
+        public event EventHandler? MediaEnded;
+
         public void Open(string path)
         {
             Opened.Add(path);
@@ -49,6 +51,15 @@ public class VideoPreviewViewModelTests
         public void Play() => IsPlaying = true;
 
         public void Pause() => IsPlaying = false;
+
+        /// <summary>Playback runs off the end of the video — what the real <c>MediaElement</c> reports via
+        /// <c>MediaEnded</c>, and what <see cref="MediaElementPlayer"/> turns into this event after
+        /// clearing its own <c>IsPlaying</c>.</summary>
+        public void EndPlayback()
+        {
+            IsPlaying = false;
+            MediaEnded?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     /// <summary>A player that does NOT answer synchronously — the test decides exactly when (and
@@ -69,6 +80,10 @@ public class VideoPreviewViewModelTests
         public event EventHandler? MediaOpened;
 
         public event EventHandler<string>? MediaFailed;
+
+#pragma warning disable CS0067 // This player never reaches the end of anything; IMediaPlayer still requires the event.
+        public event EventHandler? MediaEnded;
+#pragma warning restore CS0067
 
         public void Open(string path) => Opened.Add(path);
 
@@ -378,6 +393,31 @@ public class VideoPreviewViewModelTests
         Assert.Contains(nameof(VideoPreviewViewModel.PositionText), raised);
         Assert.NotEqual(before, vm.PositionText);
         Assert.Equal(TrimParsing.Format(TimeSpan.FromSeconds(7)), vm.PositionText);
+    }
+
+    [Fact]
+    public async Task WhenPlaybackReachesTheEnd_TheViewModelStopsClaimingToBePlaying()
+    {
+        // FINDING 4 (final review). Nothing handled the player reaching the end of the video, so IsPlaying
+        // stayed true FOREVER -- nothing else ever clears it. Two consequences the user sees: the transport
+        // shows a Pause button over a player that is not playing, and VideoPreview's 200 ms position timer
+        // (started when IsPlaying goes true, stopped when it goes false) never stops -- it goes on waking
+        // the UI thread several times a second for a video that has finished. The NOTIFICATION is the load-
+        // bearing half: IsPlaying is a computed property that reads straight through to the player, so
+        // merely READING vm.IsPlaying afterwards returns false whether or not anyone was told -- and the
+        // control's timer only learns about it from PropertyChanged.
+        var (vm, player, _, _) = Build();
+        await vm.LoadAsync(@"C:\clip.mp4");
+        vm.Play();
+        Assert.True(vm.IsPlaying);
+
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        player.EndPlayback();
+
+        Assert.Contains(nameof(VideoPreviewViewModel.IsPlaying), raised);
+        Assert.False(vm.IsPlaying);
     }
 
     [Fact]

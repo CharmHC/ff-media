@@ -123,6 +123,62 @@ public class MediaElementPlayerTests
     // there is no playback state to read back. Any test here would pass whether or not the call is present.
     // Verified by the human click-through instead: navigate away from a PLAYING preview and listen.
 
+    /// <summary>FINDING 4 (final review). Nothing handled <c>MediaElement.MediaEnded</c>, so when playback
+    /// reached the end of the video <c>IsPlaying</c> stayed <b>true forever</b> — nothing else ever clears
+    /// it. The transport showed a Pause button over a player that had stopped, and <c>VideoPreview</c>'s
+    /// 200 ms polling timer (started on IsPlaying, stopped on IsPlaying) never stopped either: it kept
+    /// waking the UI thread, several times a second, for a video that had finished.</summary>
+    [Fact]
+    public void MediaEnded_ClearsIsPlaying_AndTellsTheViewModel()
+    {
+        var playingAfterTheEnd = true;
+        var ended = 0;
+
+        var error = _wpf.Run(() =>
+        {
+            var element = new MediaElement();
+            var player = new MediaElementPlayer();
+            player.Attach(element);
+            player.MediaEnded += (_, _) => ended++;
+
+            player.Open(@"C:\video.mp4");
+            player.Play();
+
+            // Playback runs off the end. Media Foundation raises this; here it is synthesized, exactly as
+            // MediaOpened is above.
+            element.RaiseEvent(new RoutedEventArgs(MediaElement.MediaEndedEvent, element));
+
+            playingAfterTheEnd = player.IsPlaying;
+        });
+
+        Assert.True(error is null, $"MediaEnded test threw:\n{error}");
+        Assert.False(playingAfterTheEnd, "Reaching the end of the video left the player reporting IsPlaying.");
+        Assert.Equal(1, ended);
+    }
+
+    /// <summary>The discarded element must not be able to fire <c>MediaEnded</c> into the singleton either
+    /// — that would clear <c>IsPlaying</c> on the element that is actually on screen, mid-playback.</summary>
+    [Fact]
+    public void Reattach_UnhooksTheOldElementsMediaEnded_Too()
+    {
+        var ended = 0;
+
+        var error = _wpf.Run(() =>
+        {
+            var first = new MediaElement();
+            var player = new MediaElementPlayer();
+            player.Attach(first);
+            player.MediaEnded += (_, _) => ended++;
+
+            player.Attach(new MediaElement());
+
+            first.RaiseEvent(new RoutedEventArgs(MediaElement.MediaEndedEvent, first));
+        });
+
+        Assert.True(error is null, $"Re-attaching threw:\n{error}");
+        Assert.Equal(0, ended);
+    }
+
     /// <summary>A freshly-attached element has not been told to play. Leaving <c>IsPlaying</c> true across
     /// a re-attach would show the transport as playing over an element that is doing nothing.
     ///

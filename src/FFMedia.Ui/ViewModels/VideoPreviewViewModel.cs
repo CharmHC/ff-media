@@ -39,6 +39,19 @@ public partial class VideoPreviewViewModel : ObservableObject
         _analyzer = analyzer;
         _proxies = proxies;
         _player = player;
+
+        // Playback running off the end is the one thing that stops the player without anyone asking it
+        // to -- so it is the one state change nothing was told about. IsPlaying reads straight through to
+        // the player, so its VALUE was already right; what was missing was the NOTIFICATION, and WPF only
+        // refreshes a binding whose exact path was notified. Without it the transport kept showing a Pause
+        // button over a stopped video and the view's 200 ms position timer (started/stopped purely off
+        // this notification) polled on forever. Subscribed for the lifetime of the VM: both this and the
+        // player are DI singletons, so there is nothing to unsubscribe from and nothing to leak.
+        _player.MediaEnded += (_, _) =>
+        {
+            OnPropertyChanged(nameof(IsPlaying));
+            RefreshPosition();
+        };
     }
 
     /// <summary>The user captured the current moment as the range's START.</summary>

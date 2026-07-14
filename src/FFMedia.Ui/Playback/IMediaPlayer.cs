@@ -22,6 +22,11 @@ public interface IMediaPlayer
     /// Foundation does not decode. This is the signal that triggers the proxy fallback.</summary>
     event EventHandler<string>? MediaFailed;
 
+    /// <summary>Raised when playback runs off the end of the video. Without it, nothing ever clears
+    /// <see cref="IsPlaying"/> — the transport shows a Pause button over a player that has stopped, and
+    /// the view's position timer polls on forever.</summary>
+    event EventHandler? MediaEnded;
+
     void Open(string path);
 
     void Play();
