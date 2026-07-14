@@ -23,11 +23,30 @@ public class PreviewProxyTests : IDisposable
 
     private sealed class FakeFfmpeg : IFfmpegRunner
     {
+        private readonly List<FileStream> _held = new();
+
         public List<IReadOnlyList<string>> Calls { get; } = new();
 
         public Func<Result> Behavior { get; set; } = Result.Success;
 
         public int OutputBytes { get; set; } = 2048;
+
+        /// <summary>Keeps a handle open on the output it just wrote — which is what a KILLED ffmpeg
+        /// actually looks like from the service's side. <c>ProcessRunner</c> calls <c>Kill()</c> and
+        /// rethrows WITHOUT awaiting exit, so the service's own <c>File.Delete</c> races a handle that
+        /// is still open and loses, swallowing the <see cref="IOException"/>. The partial file survives.
+        /// Nothing in this suite modelled that, so nothing could see where the partial file was LEFT.</summary>
+        public bool HoldOutputOpen { get; set; }
+
+        public void ReleaseHeldOutputs()
+        {
+            foreach (var stream in _held)
+            {
+                stream.Dispose();
+            }
+
+            _held.Clear();
+        }
 
         public Task<Result> RunAsync(
             IReadOnlyList<string> arguments, IProgress<FfmpegProgress>? progress = null, CancellationToken ct = default)
@@ -42,6 +61,11 @@ public class PreviewProxyTests : IDisposable
             if (OutputBytes > 0)
             {
                 File.WriteAllBytes(arguments[^1], new byte[OutputBytes]);
+
+                if (HoldOutputOpen)
+                {
+                    _held.Add(File.Open(arguments[^1], FileMode.Open, FileAccess.Read, FileShare.Read));
+                }
             }
 
             return Task.FromResult(Behavior());
@@ -220,6 +244,79 @@ public class PreviewProxyTests : IDisposable
     }
 
     [Fact]
+    public async Task GetOrCreateAsync_HandsFfmpegAPartFile_NeverTheCachePathItself()
+    {
+        // THE RULE THIS SERVICE WAS THE ONE PLACE ON THE BRANCH NOT TO FOLLOW. GifService and
+        // MergeService both render to a SIBLING, verify THAT, and only then File.Move a proven-whole
+        // file into place -- nothing the user already has is touched until there is something worth
+        // replacing it with. Here the "something the user already has" is the CACHE ENTRY, and the cache
+        // check is only File.Exists && Length > 0: whatever sits at the cache path IS the proxy, forever
+        // (or for seven days). Pointing ffmpeg straight at it means a transcode that dies without
+        // exiting cleanly leaves a moov-less, unplayable file that every future open of that video is
+        // served, permanently. Verified against real ffmpeg by the reviewer: killing the transcode 1 s in
+        // leaves 524 KB that ffprobe rejects with "moov atom not found" -- because -movflags +faststart
+        // writes the moov atom LAST.
+        var (service, ffmpeg, source) = Build();
+
+        var result = await service.GetOrCreateAsync(source, Info());
+
+        Assert.True(result.IsSuccess, result.Error);
+
+        var cachePath = PreviewProxyPath.For(source, _dir);
+        var ffmpegOutput = ffmpeg.Calls[0][^1];
+
+        Assert.NotEqual(cachePath, ffmpegOutput);
+        Assert.Contains(".part", ffmpegOutput, StringComparison.Ordinal);
+        Assert.Equal(Path.GetDirectoryName(cachePath), Path.GetDirectoryName(ffmpegOutput));  // sibling: Move is a free rename
+
+        // ...and it MUST still end in .mp4. ffmpeg picks its MUXER from the output extension and refuses
+        // an unknown one outright -- a sibling named "....mp4.part" fails every real transcode with
+        // "Unable to choose an output format", while every fake in this file accepts it happily. That is
+        // exactly what the real-ffmpeg integration test caught, and this assertion is what keeps a unit
+        // test able to catch it too.
+        Assert.EndsWith(".mp4", ffmpegOutput, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Equal(cachePath, result.Value);       // ...and only the FINISHED file lands at the cache path
+        Assert.True(File.Exists(cachePath));
+        Assert.False(File.Exists(ffmpegOutput));     // the part file is consumed by the move, not left behind
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_WhenAKilledTranscodeStrandsItsOutput_TheCachePathStaysClean_SoTheNextOpenRetries()
+    {
+        // Reachable with NO race at all: quit or crash the app while "Preparing a preview…" is on screen.
+        // And on cancel too -- ProcessRunner calls Kill() and rethrows WITHOUT awaiting exit, so the
+        // service's own delete races a still-open handle and loses (modelled here by HoldOutputOpen).
+        // Whatever ffmpeg was pointed at is what survives; the ONLY thing that keeps that survivor out of
+        // the cache is that ffmpeg was never pointed at the cache path.
+        var (service, ffmpeg, source) = Build();
+        ffmpeg.Behavior = () => Result.Failure("ffmpeg was killed");
+        ffmpeg.OutputBytes = 512;          // 512 bytes of a file with no moov atom: unplayable
+        ffmpeg.HoldOutputOpen = true;      // ...and the cleanup delete cannot get rid of it
+
+        var first = await service.GetOrCreateAsync(source, Info());
+        Assert.False(first.IsSuccess);
+
+        var cachePath = PreviewProxyPath.For(source, _dir);
+        Assert.False(
+            File.Exists(cachePath),
+            "A killed transcode's partial output is sitting AT the cache path. File.Exists && Length > 0 " +
+            "will serve it to MediaElement forever -- the preview is dead for this video for 7 days.");
+
+        // And prove the consequence, not just the absence: the next open really does transcode again
+        // rather than short-circuiting on garbage.
+        ffmpeg.ReleaseHeldOutputs();
+        ffmpeg.HoldOutputOpen = false;
+        ffmpeg.Behavior = Result.Success;
+
+        var second = await service.GetOrCreateAsync(source, Info());
+
+        Assert.True(second.IsSuccess, second.Error);
+        Assert.Equal(2, ffmpeg.Calls.Count);
+        Assert.Equal(cachePath, second.Value);
+    }
+
+    [Fact]
     public async Task GetOrCreateAsync_WhenTheProxyIsEmpty_ItFails_RatherThanCachingRubbish()
     {
         // A zero-byte "success" cached forever would poison every future open of this video.
@@ -292,6 +389,27 @@ public class PreviewProxyTests : IDisposable
         Assert.False(File.Exists(stale));
         Assert.True(File.Exists(fresh));
         Assert.True(File.Exists(unrelated));
+    }
+
+    [Fact]
+    public void SweepStale_AlsoReapsStrandedPartFiles()
+    {
+        // The .part indirection keeps a killed transcode's wreckage OUT of the cache -- but the wreckage
+        // still exists. An app killed mid-transcode never runs any cleanup at all, so without this the
+        // fix would trade a poisoned cache for an unbounded pile of half-transcodes in %Temp%. Same
+        // 7-day cutoff, same glob family.
+        var (service, _, _) = Build();
+
+        var stalePart = Path.Combine(_dir, "preview-abandoned222222222222.part.mp4");
+        var freshPart = Path.Combine(_dir, "preview-inflight333333333333.part.mp4");
+        File.WriteAllBytes(stalePart, new byte[10]);
+        File.WriteAllBytes(freshPart, new byte[10]);
+        File.SetLastWriteTimeUtc(stalePart, DateTime.UtcNow.AddDays(-8));
+
+        service.SweepStale();
+
+        Assert.False(File.Exists(stalePart), "A .part file stranded by a killed transcode is never reclaimed.");
+        Assert.True(File.Exists(freshPart), "A transcode that is running RIGHT NOW must not have its output swept.");
     }
 
     /// <summary>FINDING (Task 5 review, IMPORTANT 2). <see cref="PreviewProxyService.SweepStale"/> was
