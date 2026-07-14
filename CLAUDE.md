@@ -159,7 +159,38 @@ _Newest first. One entry per completed task/session._
   effect headlessly**, so I deleted the test rather than ship one that passes either way. *Do not reason about
   what a library "surely" does — and when you cannot prove a fix, say so instead of writing a test that cannot
   fail.*
-- **Verified:** clean Release build **0 warnings / 0 errors**; **803/803** unit tests; **12/12** integration
+- **The final whole-branch review found a Critical, for the third milestone running — and it was in the
+  FORMATTER, not the video code.** `TrimParsing.Format` built the whole part by **truncation** and the
+  fraction by **rounding**, so any fraction ≥ 0.9995 rounded up to a bare `1` that was **glued onto the
+  truncated seconds** — the carry never reached them. **`Format(1.9996s)` emitted `"0:011"`, which parses
+  back as ELEVEN SECONDS.** A user who paused at 1.9996 s and clicked **Set Start** got a GIF cut from
+  **11 s** — silently, with the range still valid and Create still enabled. Neighbouring values (`"0:301"`,
+  `"0:591"`) are **unparseable outright**, so a probed source duration landing in that band greys Create out
+  on a **perfectly good freshly-loaded video** and blames the user's end time. **Both** values M9 newly
+  feeds through `Format` — the player's **live position** and ffprobe's **probed duration** — are arbitrary
+  *machine-produced* sub-second numbers, so the band is hit about **one capture in 2500**, not never.
+  **Task 1 tested `Format` only against values a HUMAN types** (`.45`, `.5`, `.25`) and its round-trip
+  theory stopped at `0.999` — **one step short of the 0.9995 carry boundary**. Task 5 is what first piped a
+  machine value through it. *The fixture must vary along the axis the invariant is about* — **the fifth time
+  on this project**, and this time the axis was "a value nobody would ever type."
+- **Three more from the same review, each a composition the tasks could not see alone.** (1) **A killed
+  proxy transcode poisoned that video's preview for seven days.** The transcode wrote **straight to its
+  permanent cache key**, and the cache check is only *exists && non-empty* — so quitting the app while
+  *"Preparing a preview…"* is on screen left a half-written file that is a **cache hit forever**
+  (`+faststart` writes the moov atom **last**, so it is unplayable). The fallback is **dead for that file**,
+  with no recovery. **This was the one place on the branch not applying the project's own hardest-won rule** —
+  `GifService` and `MergeService` both write to a **sibling**, verify, and only then move it into place. It
+  now does too. (2) **A preview left playing kept playing after you navigated away** — `UnloadedBehavior` is
+  `Manual`, so nothing stops it; my earlier "fix" for this landed in `Attach`, which is only on the *return*
+  trip. **I shipped that one deliberately untested because `Close()` has no headless observable — and the
+  half-fix went straight through.** (3) Reaching the end of a video left `IsPlaying` **true forever**, so the
+  200 ms poll timer never stopped.
+- **Real ffmpeg caught a trap inside one of the fixes, and no fake could have.** The proxy's sibling was
+  first named `preview-<hash>.mp4.part` — every unit test passed, and the integration test failed:
+  *"Unable to choose an output format for '…mp4.part'"*. **ffmpeg picks its muxer from the output
+  extension** — the exact constraint `GifService`/`MergeService` already state for *their* siblings. It is
+  now `preview-<hash>.part.mp4`.
+- **Verified:** clean Release build **0 warnings / 0 errors**; **822/822** unit tests; **12/12** integration
   tests against real ffmpeg — a real **VP9/WebM** source yields a playable **h264** proxy at exactly
   **640×360** whose **duration *and* frame rate both match the source**.
 - **NOT verified — a human has not clicked through the preview.** Headless environment; a real playing
