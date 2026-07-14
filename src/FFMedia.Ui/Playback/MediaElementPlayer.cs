@@ -183,6 +183,26 @@ public sealed class MediaElementPlayer : IMediaPlayer
 
         IsPlaying = false;
         _element.Source = new Uri(path);
+
+        // ...and then TELL IT TO DO SOMETHING, or it will never open the file.
+        //
+        // LoadedBehavior is Manual (Attach sets it, and it is load-bearing: without it the element
+        // autoplays and ignores every Play/Pause/seek this transport issues). But a MediaElement in
+        // Manual mode does NOT begin loading its media when you merely assign Source -- it waits to be
+        // told to do something. Measured against a real H.264 MP4 on a real message loop: Source alone ->
+        // MediaOpened NEVER fires; Source + Pause() -> opens in ~440 ms.
+        //
+        // Assigning Source and returning is exactly what this method used to do, and it shipped the whole
+        // preview broken: LoadAsync awaits MediaOpened/MediaFailed, so it sat waiting for an answer that
+        // COULD NOT COME. IsReady stayed false -- black rectangle, slider and play/pause and both capture
+        // buttons dead. And since MediaFailed could not arrive either, the VP9/WebM proxy fallback (the
+        // entire reason M9 exists) was unreachable: a WebM hung exactly like an MP4.
+        //
+        // Pause() rather than Play(): it opens the media and parks it on the first frame, which is the
+        // state the preview wants to start in. (ScrubbingEnabled, also set in Attach, is what makes that
+        // frame actually render rather than leaving the rectangle black.) Play() would open it too, but
+        // by starting playback nobody asked for.
+        _element.Pause();
     }
 
     public void Play()
