@@ -41,7 +41,14 @@
              against, and no range to trim. -->
         <StackPanel Visibility="{Binding SourceLoaded, Converter={StaticResource BoolToVisibility}}">
 
-            <!-- 2. Range -->
+            <!-- 2. Preview: pause on the frame you want, then Set Start / Set End write it straight into
+                 the Range boxes right below — the control that PRODUCES a timestamp sits directly above
+                 the ones that HOLD one. Hosted via PreviewHost.Content (code-behind) rather than declared
+                 inline: VideoPreview needs the real MediaElementPlayer singleton from DI, which this page
+                 has no way to construct itself. -->
+            <ContentControl x:Name="PreviewHost" Focusable="False" Margin="0,0,0,16" />
+
+            <!-- 3. Range -->
             <StackPanel IsEnabled="{Binding CanEditParameters}">
                 <TextBlock Text="Range" FontSize="16" FontWeight="SemiBold" />
                 <UniformGrid Columns="2" Margin="0,8,0,4">
@@ -61,7 +68,7 @@
                            Margin="0,0,0,16" />
             </StackPanel>
 
-            <!-- 3. Output -->
+            <!-- 4. Output -->
             <StackPanel IsEnabled="{Binding CanEditParameters}">
                 <TextBlock Text="Output" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
                 <UniformGrid Columns="2" Margin="0,0,0,8">
@@ -89,14 +96,14 @@
                 </UniformGrid>
             </StackPanel>
 
-            <!-- 4. Estimate -->
+            <!-- 5. Estimate -->
             <TextBlock Text="{Binding EstimateText}" FontWeight="SemiBold" Margin="0,0,0,4"
                        ToolTip="The estimated finished file size, as a range calibrated from GIFs you have made before. It gets more accurate the more you use this tool." />
             <TextBlock Text="{Binding SizeWarningMessage}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,12"
                        Foreground="{DynamicResource SystemFillColorCautionBrush}"
                        Visibility="{Binding ShowSizeWarning, Converter={StaticResource BoolToVisibility}}" />
 
-            <!-- 5. File name + folder -->
+            <!-- 6. File name + folder -->
             <TextBlock Text="File name" />
             <ui:TextBox Text="{Binding OutputFileName, UpdateSourceTrigger=LostFocus}" Margin="0,0,0,8"
                         ToolTip="What to call the GIF. If a file of this name is already there, it is replaced." />
@@ -114,7 +121,7 @@
                            ToolTip="Choose the folder to save the GIF in." />
             </Grid>
 
-            <!-- 6. Actions -->
+            <!-- 7. Actions -->
             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                 <ui:Button Content="Create GIF" Appearance="Primary" Icon="{ui:SymbolIcon Gif24}"
                            Command="{Binding CreateCommand}" Margin="0,0,8,0"

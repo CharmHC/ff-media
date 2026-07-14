@@ -10,6 +10,7 @@ using FFMedia.Core.Settings;
 using FFMedia.Media;
 using FFMedia.Tools.GifMaker.Models;
 using FFMedia.Tools.GifMaker.Services;
+using FFMedia.Ui.ViewModels;
 
 namespace FFMedia.Tools.GifMaker.ViewModels;
 
@@ -46,7 +47,8 @@ public partial class GifMakerViewModel : ObservableObject
         IGifSizeProfileStore profiles,
         ISettingsService settings,
         IHistoryService history,
-        INotificationService notifications)
+        INotificationService notifications,
+        VideoPreviewViewModel preview)
     {
         ArgumentNullException.ThrowIfNull(analyzer);
         ArgumentNullException.ThrowIfNull(gifService);
@@ -54,6 +56,7 @@ public partial class GifMakerViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(notifications);
+        ArgumentNullException.ThrowIfNull(preview);
 
         _analyzer = analyzer;
         _gifService = gifService;
@@ -61,7 +64,66 @@ public partial class GifMakerViewModel : ObservableObject
         _history = history;
         _notifications = notifications;
 
+        Preview = preview;
+        Preview.StartCaptured += OnPreviewStartCaptured;
+        Preview.EndCaptured += OnPreviewEndCaptured;
+
         OutputFolder = settings.Current.DefaultOutputFolder;
+    }
+
+    /// <summary>Pause on the frame you want, then <c>Set Start</c>/<c>Set End</c> write it straight
+    /// into <see cref="StartText"/>/<see cref="EndText"/> below — see <see cref="OnPreviewStartCaptured"/>
+    /// and <see cref="OnPreviewEndCaptured"/>. Constructor-injected, singleton like this VM itself, so
+    /// the loaded video survives navigation.</summary>
+    public VideoPreviewViewModel Preview { get; }
+
+    /// <summary>Writes a captured moment into <see cref="StartText"/> — UNLESS doing so would invert the
+    /// range (the captured moment is at or after the current end), which is refused with an explanation
+    /// in <see cref="RangeHint"/> rather than silently swallowed or silently reordered. A capture whose
+    /// other side (<see cref="EndText"/>) does not currently parse is never blocked by it — there is
+    /// nothing real to invert against.
+    ///
+    /// <para>Guarded on <see cref="IsRendering"/> HERE, not only in the preview's own capture command: the
+    /// render holds a <b>snapshot</b>, and today the only thing raising this event is a
+    /// <c>RelayCommand</c> — but M10 adds a draggable range band to this same VM, and <b>a gesture that is
+    /// not a command bypasses <c>CanExecute</c> entirely</b>. That bug shipped twice in M8. The mutator
+    /// defends itself rather than trusting its one current caller.</para></summary>
+    private void OnPreviewStartCaptured(object? sender, TimeSpan position)
+    {
+        if (IsRendering)
+        {
+            return;
+        }
+
+        if (TrimParsing.TryParse(EndText) is { } end && position >= end)
+        {
+            RangeHint = string.Create(
+                CultureInfo.InvariantCulture,
+                $"That moment is at or after the current end ({EndText}) — capturing it as Start would invert the range. Capture End first, or move to an earlier moment.");
+            return;
+        }
+
+        StartText = TrimParsing.Format(position);
+    }
+
+    /// <summary>Symmetric to <see cref="OnPreviewStartCaptured"/>: a captured moment at or before the
+    /// current start is refused rather than reordering the range out from under the user.</summary>
+    private void OnPreviewEndCaptured(object? sender, TimeSpan position)
+    {
+        if (IsRendering)
+        {
+            return;
+        }
+
+        if (TrimParsing.TryParse(StartText) is { } start && position <= start)
+        {
+            RangeHint = string.Create(
+                CultureInfo.InvariantCulture,
+                $"That moment is at or before the current start ({StartText}) — capturing it as End would invert the range. Capture Start first, or move to a later moment.");
+            return;
+        }
+
+        EndText = TrimParsing.Format(position);
     }
 
     // ---- the loaded source ---------------------------------------------------
@@ -127,18 +189,24 @@ public partial class GifMakerViewModel : ObservableObject
         Bounds = GifBounds.From(probe.Value);
         SelectedSize = Bounds.Sizes[0];
         SelectedFrameRate = Bounds.FrameRates[0];
-        StartText = FormatTime(TimeSpan.Zero);
-        EndText = FormatTime(probe.Value.Duration);
+        StartText = TrimParsing.Format(TimeSpan.Zero);
+        EndText = TrimParsing.Format(probe.Value.Duration);
         OutputFileName = Path.GetFileNameWithoutExtension(path) + ".gif";
         SourceSummary = DescribeSource(probe.Value);
 
         OnPropertyChanged(nameof(SourceLoaded));
         Recompute();
+
+        // The preview is an AID, never a GATE: everything above already works with hand-typed times
+        // regardless of whether this succeeds. VideoPreviewViewModel.LoadAsync never throws for an
+        // expected failure (a bad probe, an unplayable source AND a failed proxy) -- it reports through
+        // its own StatusMessage instead.
+        await Preview.LoadAsync(path).ConfigureAwait(true);
     }
 
     private static string DescribeSource(MediaInfo info) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{info.Video!.Width}x{info.Video.Height} · {info.Video.FrameRate.Value:0.###} fps · {FormatTime(info.Duration)}");
+        $"{info.Video!.Width}x{info.Video.Height} · {info.Video.FrameRate.Value:0.###} fps · {TrimParsing.Format(info.Duration)}");
 
     // ---- parameters -----------------------------------------------------------
 
@@ -237,7 +305,7 @@ public partial class GifMakerViewModel : ObservableObject
         {
             return new RangeEvaluation(false, string.Create(
                 CultureInfo.InvariantCulture,
-                $"The end time is past the end of the video (which is {FormatTime(_sourceInfo.Duration)} long)."));
+                $"The end time is past the end of the video (which is {TrimParsing.Format(_sourceInfo.Duration)} long)."));
         }
 
         return new RangeEvaluation(true, "");
@@ -340,6 +408,11 @@ public partial class GifMakerViewModel : ObservableObject
         CreateCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
         LoadVideoCommand.NotifyCanExecuteChanged();
+
+        // Kept in LOCKSTEP with CanEditParameters: the render holds a SNAPSHOT of the request, so a
+        // preview that can still capture into Start/End while rendering describes a job that is not the
+        // one running. This exact bug shipped twice in M8.
+        Preview.CanCapture = CanEditParameters;
     }
 
     [RelayCommand(CanExecute = nameof(CanCreate))]
@@ -459,19 +532,6 @@ public partial class GifMakerViewModel : ObservableObject
             _ => StatusMessage,
         };
     }
-
-    /// <summary>m:ss, or h:mm:ss past an hour. Invariant — this is a duration, not a local time. Also
-    /// round-trips through <see cref="TrimParsing.TryParse"/>, since it is used to seed
-    /// <see cref="StartText"/>/<see cref="EndText"/>.</summary>
-    /// <remarks>Below one second, <c>m\:ss</c> truncates to <c>"0:00"</c> — for a source under a
-    /// second long, that gives the SAME text for both the default start and the default end, which
-    /// then fails the <c>end &lt;= start</c> check: the range defaults to invalid the moment the
-    /// source itself is very short. Below one second, format as plain fractional seconds instead
-    /// (<see cref="TrimParsing.TryParse"/> already accepts that form) so the end text always
-    /// round-trips to the source's real duration rather than being floored away.</remarks>
-    private static string FormatTime(TimeSpan span) => span > TimeSpan.Zero && span.TotalSeconds < 1
-        ? span.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)
-        : span.ToString(span.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
 
     /// <summary>Reports on the calling thread. See <c>MergerViewModel</c>'s equivalent for why the BCL
     /// <see cref="Progress{T}"/> is wrong here (it marshals to the captured context, reordering

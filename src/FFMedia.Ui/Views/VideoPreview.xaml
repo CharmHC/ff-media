@@ -1,0 +1,81 @@
+<UserControl x:Class="FFMedia.Ui.Views.VideoPreview"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:views="clr-namespace:FFMedia.Ui.Views"
+             Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+             ToolTipService.ShowDuration="30000" ToolTipService.InitialShowDelay="400">
+    <!-- Foreground is load-bearing (SDD §13): WPF-UI's implicit TextBlock style has no setters at all
+         (verified against the WPF-UI 4.3.0 source), so a plain TextBlock falls back to WPF's default
+         BLACK — invisible in dark mode — unless Foreground is inherited from somewhere. This control
+         is meant to be reusable (the Merger and Downloader, M10) rather than only ever hosted inside a
+         page that already sets it, so it sets its own rather than relying on a host to. -->
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <views:TimeSpanSecondsConverter x:Key="Seconds" />
+        <views:TrimFormatConverter x:Key="TrimFormat" />
+    </UserControl.Resources>
+
+    <!-- No ScrollViewer here, deliberately. This control is embedded inside a Page's own layout (the
+         GIF Maker, and later the Merger/Downloader); the SHELL already wraps every page in one
+         (WPF-UI's NavigationViewContentPresenter). A nested ScrollViewer is handed unbounded height by
+         the outer one, so it can never scroll — yet WPF's ScrollViewer marks mouse-wheel events HANDLED
+         even when it cannot move, so it silently swallows every tick the shell's own scroller (which DOES
+         have room) never sees. Shipped from MergerPage once already; not repeating it here. -->
+    <StackPanel>
+
+        <!-- 1. The player itself -->
+        <Border Background="Black" Height="260">
+            <MediaElement x:Name="Player" Stretch="Uniform" LoadedBehavior="Manual" UnloadedBehavior="Manual" />
+        </Border>
+
+        <!-- 2. Seek slider + position/duration readout -->
+        <Grid Margin="0,8,0,0" IsEnabled="{Binding IsReady}"
+              ToolTip="Drag to move through the video. The GIF is cut from the part you choose below.">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Slider Grid.Column="0" Minimum="0"
+                    Maximum="{Binding Duration, Converter={StaticResource Seconds}, Mode=OneWay}"
+                    Value="{Binding Position, Converter={StaticResource Seconds}}" />
+            <TextBlock Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="90"
+                       Text="{Binding PositionText}" />
+        </Grid>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8" Opacity="0.7">
+            <TextBlock Text="Duration: " FontSize="12" />
+            <TextBlock Text="{Binding Duration, Converter={StaticResource TrimFormat}}" FontSize="12" />
+        </StackPanel>
+
+        <!-- 3. Transport: play/pause + frame step -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8" IsEnabled="{Binding IsReady}">
+            <ui:Button Icon="{ui:SymbolIcon Play24}" Command="{Binding PlayCommand}" Margin="0,0,4,0"
+                       ToolTip="Play the video." />
+            <ui:Button Icon="{ui:SymbolIcon Pause24}" Command="{Binding PauseCommand}" Margin="0,0,16,0"
+                       ToolTip="Pause the video." />
+            <StackPanel Orientation="Horizontal"
+                        ToolTip="Nudges one frame at a time, so you can land on exactly the frame you want.">
+                <ui:Button Icon="{ui:SymbolIcon ChevronLeft24}" Command="{Binding StepBackCommand}" Margin="0,0,4,0" />
+                <ui:Button Icon="{ui:SymbolIcon ChevronRight24}" Command="{Binding StepForwardCommand}" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- 4. Capture -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8"
+                    ToolTip="Uses the exact moment the video is paused at as the start (or end) of the GIF. Pause on the frame you want, then click.">
+            <ui:Button Content="‹ Set Start" Command="{Binding CaptureStartCommand}" Margin="0,0,8,0" />
+            <ui:Button Content="Set End ›" Command="{Binding CaptureEndCommand}" />
+        </StackPanel>
+
+        <!-- 5. Proxy preparation progress: only while a fallback transcode is in flight -->
+        <ProgressBar Value="{Binding ProxyPercent, Mode=OneWay}" Maximum="100" Height="6" Margin="0,0,0,4"
+                     Visibility="{Binding IsPreparingProxy, Converter={StaticResource BoolToVisibility}}" />
+
+        <!-- Covers BOTH the "Preparing a preview…" progress message and any failure reason (a bad
+             probe, a proxy that could not be built): StatusMessage is blank whenever there is nothing
+             to say, so this is always safe to show unconditionally. -->
+        <TextBlock Text="{Binding StatusMessage}" Opacity="0.8" FontSize="12" TextWrapping="Wrap" />
+
+    </StackPanel>
+</UserControl>

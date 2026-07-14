@@ -5,9 +5,12 @@ using FFMedia.Core.Notifications;
 using FFMedia.Core.Results;
 using FFMedia.Core.Settings;
 using FFMedia.Media;
+using FFMedia.Media.Preview;
 using FFMedia.Tools.GifMaker.Models;
 using FFMedia.Tools.GifMaker.Services;
 using FFMedia.Tools.GifMaker.ViewModels;
+using FFMedia.Ui.Playback;
+using FFMedia.Ui.ViewModels;
 using Xunit;
 
 namespace FFMedia.Tests.GifMaker;
@@ -107,6 +110,48 @@ public class GifMakerViewModelTests
         public void Notify(Notification notification) => Sent.Add(notification);
     }
 
+    /// <summary>A player that answers <c>Open</c> synchronously (unlike the real <c>MediaElement</c>,
+    /// which answers off a message pump this headless test has none of) — so
+    /// <see cref="VideoPreviewViewModel.LoadAsync"/> never hangs awaiting an event that would otherwise
+    /// need a dispatcher to raise it.</summary>
+    private sealed class FakePreviewPlayer : IMediaPlayer
+    {
+        public TimeSpan Position { get; set; }
+
+        public TimeSpan? Duration { get; private set; }
+
+        public bool IsPlaying { get; private set; }
+
+        public event EventHandler? MediaOpened;
+
+#pragma warning disable CS0067 // This stub never fails an open or reaches the end; IMediaPlayer still requires the events.
+        public event EventHandler<string>? MediaFailed;
+
+        public event EventHandler? MediaEnded;
+#pragma warning restore CS0067
+
+        public void Open(string path)
+        {
+            Duration = TimeSpan.FromSeconds(600);
+            MediaOpened?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void Play() => IsPlaying = true;
+
+        public void Pause() => IsPlaying = false;
+    }
+
+    private sealed class FakePreviewProxies : IPreviewProxyService
+    {
+        public Task<Result<string>> GetOrCreateAsync(
+            string sourcePath, MediaInfo info, IProgress<double>? progress = null, CancellationToken ct = default)
+            => Task.FromResult(Result<string>.Success(sourcePath));
+
+        public void SweepStale()
+        {
+        }
+    }
+
     // ---- helpers -----------------------------------------------------------
 
     private const string VideoPath = @"C:\video.mp4";
@@ -120,7 +165,7 @@ public class GifMakerViewModelTests
 
     private sealed record Harness(
         GifMakerViewModel Vm, FakeAnalyzer Analyzer, FakeGifService Service,
-        FakeHistory History, FakeNotifications Notifications, FakeStore Store);
+        FakeHistory History, FakeNotifications Notifications, FakeStore Store, VideoPreviewViewModel Preview);
 
     private static Harness Build()
     {
@@ -130,8 +175,11 @@ public class GifMakerViewModelTests
         var history = new FakeHistory();
         var notifications = new FakeNotifications();
         var settings = new FakeSettings();
-        var vm = new GifMakerViewModel(analyzer, service, store, settings, history, notifications);
-        return new Harness(vm, analyzer, service, history, notifications, store);
+        // The SAME analyzer backs both the GIF Maker's own probe and the preview's -- exactly how DI
+        // wires it in production (AddGifMakerEngine's IMediaAnalyzer is TryAddSingleton, shared).
+        var preview = new VideoPreviewViewModel(analyzer, new FakePreviewProxies(), new FakePreviewPlayer());
+        var vm = new GifMakerViewModel(analyzer, service, store, settings, history, notifications, preview);
+        return new Harness(vm, analyzer, service, history, notifications, store, preview);
     }
 
     /// <summary>A harness with a video already loaded at <see cref="VideoPath"/>.</summary>
@@ -269,6 +317,157 @@ public class GifMakerViewModelTests
         Assert.Equal(new Resolution(1280, 720), h.Vm.SelectedSize);
         Assert.Equal(new FrameRate(24, 1), h.Vm.SelectedFrameRate);
         Assert.False(string.IsNullOrEmpty(h.Vm.EstimateText));
+    }
+
+    // ---- the preview (M9) -------------------------------------------------------
+
+    [Fact]
+    public async Task LoadVideoAsync_AlsoLoadsThePreview()
+    {
+        var h = Build();
+        h.Analyzer.Returns(VideoPath, Info(seconds: 15));
+
+        await h.Vm.LoadVideoAsync(VideoPath);
+
+        Assert.True(h.Preview.IsReady);
+        Assert.Equal(TimeSpan.FromSeconds(15), h.Preview.Duration);
+    }
+
+    [Fact]
+    public async Task CapturingAStart_WritesItIntoStartText_WithSubSecondPrecision()
+    {
+        // A whole-second capture would pass against a TRUNCATING formatter too -- the fraction is the
+        // whole point (CLAUDE.md: FormatTime's h\:mm\:ss bug, and TrimParsing.Format exists to fix it).
+        var h = await BuildLoadedAsync(seconds: 200);
+
+        h.Preview.Position = TimeSpan.FromSeconds(83.45);
+        h.Preview.CaptureStartCommand.Execute(null);
+
+        Assert.Equal("1:23.45", h.Vm.StartText);
+    }
+
+    [Fact]
+    public async Task CapturingAnEnd_WritesItIntoEndText_AndTheEstimateRecomputes()
+    {
+        var h = await BuildLoadedAsync(seconds: 200);
+        var before = h.Vm.EstimateText;
+
+        h.Preview.Position = TimeSpan.FromSeconds(50);
+        h.Preview.CaptureEndCommand.Execute(null);
+
+        // A LITERAL, not TrimParsing.Format(...) -- computing the expectation with the production
+        // formatter makes the assertion tautological: it would pass against ANY formatter, including one
+        // that truncated the fraction away.
+        Assert.Equal("0:50", h.Vm.EndText);
+        Assert.NotEqual(before, h.Vm.EstimateText); // shrunk from the full 200s range down to 50s
+    }
+
+    [Fact]
+    public async Task CapturingAStartAfterTheEnd_IsRefused_AndExplainsWhy()
+    {
+        // Never silently swallowed, never silently reordered -- a capture that would invert the range
+        // is refused, and the refusal says why.
+        var h = await BuildLoadedAsync(seconds: 200);
+        h.Vm.EndText = "0:10";
+        var originalStart = h.Vm.StartText;
+
+        h.Preview.Position = TimeSpan.FromSeconds(20); // after the current end
+        h.Preview.CaptureStartCommand.Execute(null);
+
+        Assert.Equal(originalStart, h.Vm.StartText); // untouched
+        Assert.False(string.IsNullOrWhiteSpace(h.Vm.RangeHint));
+
+        // Asserted on what only the REFUSAL says. A bare "end" also appears in the ordinary invalid-range
+        // hint ("The end time must be after the start time."), which the un-refused path would produce --
+        // so it could not tell a refusal apart from a silently-accepted inversion.
+        Assert.Contains("invert", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Capture End first", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CapturingAnEndBeforeTheStart_IsRefused_AndExplainsWhy()
+    {
+        var h = await BuildLoadedAsync(seconds: 200);
+        h.Vm.StartText = "0:50";
+        var originalEnd = h.Vm.EndText;
+
+        h.Preview.Position = TimeSpan.FromSeconds(20); // before the current start
+        h.Preview.CaptureEndCommand.Execute(null);
+
+        Assert.Equal(originalEnd, h.Vm.EndText); // untouched
+        Assert.False(string.IsNullOrWhiteSpace(h.Vm.RangeHint));
+        Assert.Contains("invert", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Capture Start first", h.Vm.RangeHint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WhileRendering_CaptureIsFrozen()
+    {
+        // The render holds a SNAPSHOT of the request -- a page (or preview) that can still change
+        // Start/End describes a job that is not the one running. Shipped twice in M8.
+        var h = await BuildLoadedAsync(width: 1920, height: 1080, fps: 30, seconds: 10);
+        var gate = new TaskCompletionSource();
+        h.Service.Behavior = async (request, _, _) =>
+        {
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        Assert.True(h.Preview.CanCapture); // sanity: live before the render starts
+        Assert.True(h.Preview.CaptureStartCommand.CanExecute(null));
+
+        var rendering = h.Vm.CreateCommand.ExecuteAsync(null);
+        Assert.True(h.Vm.IsRendering);
+
+        Assert.False(h.Preview.CanCapture);
+        Assert.False(h.Preview.CaptureStartCommand.CanExecute(null));
+        Assert.False(h.Preview.CaptureEndCommand.CanExecute(null));
+
+        gate.SetResult();
+        await rendering;
+
+        Assert.False(h.Vm.IsRendering);
+        Assert.True(h.Preview.CanCapture); // thawed
+        Assert.True(h.Preview.CaptureStartCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task WhileRendering_ACaptureThatReachesTheHandlerAnyway_IsStillRefused()
+    {
+        // FINDING (Task 5 review, MINOR 6). The handlers trusted their ONE current caller -- the preview's
+        // CaptureStart body guard -- to have already checked. That holds only while the sole thing raising
+        // StartCaptured is a RelayCommand; M10 adds a draggable range band to this same VM, and a GESTURE
+        // BYPASSES CanExecute ENTIRELY. This project has shipped that exact bug TWICE (M8). So the mutator
+        // defends itself: the render holds a SNAPSHOT, and a Start/End that moves under it describes a job
+        // that is not the one running.
+        //
+        // The simulation of such a gesture: leave CanCapture true while the render is in flight, so the
+        // preview's own guards pass and the captured moment reaches the GIF Maker's handler regardless.
+        var h = await BuildLoadedAsync(seconds: 200);
+        var gate = new TaskCompletionSource();
+        h.Service.Behavior = async (request, _, _) =>
+        {
+            await gate.Task;
+            return Result<string>.Success(request.OutputPath);
+        };
+
+        var rendering = h.Vm.CreateCommand.ExecuteAsync(null);
+        Assert.True(h.Vm.IsRendering);
+
+        var startBefore = h.Vm.StartText;
+        var endBefore = h.Vm.EndText;
+
+        h.Preview.CanCapture = true;   // the gesture never asked
+        h.Preview.Position = TimeSpan.FromSeconds(7);
+        h.Preview.CaptureStartCommand.Execute(null);
+        h.Preview.Position = TimeSpan.FromSeconds(9);
+        h.Preview.CaptureEndCommand.Execute(null);
+
+        Assert.Equal(startBefore, h.Vm.StartText);
+        Assert.Equal(endBefore, h.Vm.EndText);
+
+        gate.SetResult();
+        await rendering;
     }
 
     // ---- the estimate ----------------------------------------------------------

@@ -9,10 +9,14 @@ using FFMedia.Core.Presets;
 using FFMedia.Core.Results;
 using FFMedia.Core.Settings;
 using FFMedia.Media;
+using FFMedia.Media.Preview;
 using FFMedia.Tools.GifMaker.Models;
 using FFMedia.Tools.GifMaker.Services;
 using FFMedia.Tools.GifMaker.ViewModels;
 using FFMedia.Tools.GifMaker.Views;
+using FFMedia.Ui.Playback;
+using FFMedia.Ui.ViewModels;
+using FFMedia.Ui.Views;
 using FFMedia.Tools.VideoMerger.Models;
 using FFMedia.Tools.VideoMerger.Services;
 using FFMedia.Tools.VideoMerger.ViewModels;
@@ -68,9 +72,17 @@ public class TooltipCoverageTests
     [Fact]
     public void EveryInputOnTheGifMakerPage_ExplainsItself()
     {
-        AssertEveryInputHasATooltip(() => new GifMakerPage(new GifMakerViewModel(
-            new StubAnalyzer(), new StubGifService(), new StubGifSizeProfileStore(),
-            new StubSettings(), new StubHistory(), new StubNotifications())));
+        // The preview (M9) is now embedded on this page, so its controls are walked too -- but none of
+        // them are ComboBox/CheckBox/ToggleButton/TextBox (buttons and the seek Slider are excluded by
+        // IsUserSettableInput), so no NEW tooltip is required by this test; it must simply stay green.
+        AssertEveryInputHasATooltip(() =>
+        {
+            var preview = new VideoPreviewViewModel(new StubAnalyzer(), new StubPreviewProxies(), new StubPreviewPlayer());
+            var vm = new GifMakerViewModel(
+                new StubAnalyzer(), new StubGifService(), new StubGifSizeProfileStore(),
+                new StubSettings(), new StubHistory(), new StubNotifications(), preview);
+            return new GifMakerPage(vm, new VideoPreview(preview, new MediaElementPlayer()));
+        });
     }
 
     private void AssertEveryInputHasATooltip(Func<Page> buildPage)
@@ -218,6 +230,48 @@ public class TooltipCoverageTests
         public Task<Result<string>> MergeAsync(
             MergeRequest request, IProgress<MergeProgress>? progress = null, CancellationToken ct = default)
             => Task.FromResult(Result<string>.Failure("stub"));
+    }
+
+    /// <summary>Answers <c>Open</c> synchronously — the real <c>MediaElement</c> answers off a message
+    /// pump this headless test has none of, and <c>GifMakerViewModel.LoadVideoAsync</c> is never called
+    /// here anyway (this test's page stays in its unloaded state), but the constructor still needs a
+    /// concrete, non-hanging <c>IMediaPlayer</c> to build <see cref="VideoPreviewViewModel"/> at all.</summary>
+    private sealed class StubPreviewPlayer : IMediaPlayer
+    {
+        public TimeSpan Position { get; set; }
+
+        public TimeSpan? Duration { get; private set; }
+
+        public bool IsPlaying { get; private set; }
+
+        public event EventHandler? MediaOpened;
+
+#pragma warning disable CS0067 // This stub never fails an open or reaches the end; IMediaPlayer still requires the events.
+        public event EventHandler<string>? MediaFailed;
+
+        public event EventHandler? MediaEnded;
+#pragma warning restore CS0067
+
+        public void Open(string path)
+        {
+            Duration = TimeSpan.FromSeconds(30);
+            MediaOpened?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void Play() => IsPlaying = true;
+
+        public void Pause() => IsPlaying = false;
+    }
+
+    private sealed class StubPreviewProxies : IPreviewProxyService
+    {
+        public Task<Result<string>> GetOrCreateAsync(
+            string sourcePath, MediaInfo info, IProgress<double>? progress = null, CancellationToken ct = default)
+            => Task.FromResult(Result<string>.Success(sourcePath));
+
+        public void SweepStale()
+        {
+        }
     }
 
     private sealed class StubGifService : IGifService

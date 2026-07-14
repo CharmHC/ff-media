@@ -1,17 +1,25 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using FFMedia.Core;
 using FFMedia.Core.History;
 using FFMedia.Core.Notifications;
 using FFMedia.Core.Results;
 using FFMedia.Core.Settings;
 using FFMedia.Media;
+using FFMedia.Media.Preview;
+using FFMedia.Tools.GifMaker;
 using FFMedia.Tools.GifMaker.Models;
 using FFMedia.Tools.GifMaker.Services;
 using FFMedia.Tools.GifMaker.ViewModels;
 using FFMedia.Tests.Views;
 using FFMedia.Tools.GifMaker.Views;
+using FFMedia.Ui.Playback;
+using FFMedia.Ui.ViewModels;
+using FFMedia.Ui.Views;
+using Microsoft.Extensions.DependencyInjection;
 using Wpf.Ui.Controls;
 using Xunit;
 
@@ -40,7 +48,8 @@ public class GifMakerPageLoadTests
         var error = RunOnStaThread(() =>
         {
             // InitializeComponent() — where the XAML is parsed and every StaticResource resolved.
-            _ = new GifMakerPage(BuildViewModel());
+            var vm = BuildViewModel();
+            _ = new GifMakerPage(vm, BuildPreviewControl(vm));
         });
 
         Assert.True(error is null, $"GifMakerPage's XAML failed to load:\n{error}");
@@ -65,7 +74,8 @@ public class GifMakerPageLoadTests
 
         var error = RunOnStaThread(() =>
         {
-            var page = new GifMakerPage(BuildLoadedViewModel());
+            var vm = BuildLoadedViewModel();
+            var page = new GifMakerPage(vm, BuildPreviewControl(vm));
             pageRoot = page.Content;
 
             // The shell's real host, in a window small enough that the page must overflow it.
@@ -103,22 +113,63 @@ public class GifMakerPageLoadTests
             "the window cannot be scrolled at all.");
     }
 
+    /// <summary>FINDING (Task 5 review, IMPORTANT 3). Nothing proved the REAL container could construct
+    /// this page any more. <c>GifMakerServiceCollectionTests</c> asserts only that a descriptor exists,
+    /// and every test in this file hand-builds the page (<c>new GifMakerPage(vm, control)</c>), bypassing
+    /// DI entirely — so the constructor parameter this task added could have had no registration behind
+    /// it, the build would be clean, all 795 tests green, and the app would throw <c>Unable to resolve
+    /// service for type 'FFMedia.Ui.Views.VideoPreview'</c> the first time the user clicked the nav item.
+    ///
+    /// <para>So: build the container <c>App.xaml.cs</c> builds and resolve the page out of it — on the STA
+    /// thread, because <c>GifMakerPage</c> and <c>VideoPreview</c> are real WPF objects.</para></summary>
+    [Fact]
+    public void GifMakerPage_ResolvesFromTheRealContainer_SoClickingTheNavItemCannotThrow()
+    {
+        var temp = Path.GetTempPath();
+        using var provider = new ServiceCollection()
+            .AddFFMediaCore(binariesDirectory: temp, dataDirectory: temp)
+            .AddSingleton<INotificationService, StubNotifications>()
+            .AddGifMakerEngine(dataDirectory: temp, tempRoot: temp)
+            .AddGifMaker()
+            .BuildServiceProvider();
+
+        GifMakerPage? page = null;
+
+        var error = RunOnStaThread(() => page = provider.GetRequiredService<GifMakerPage>());
+
+        Assert.True(error is null, $"The container could not construct GifMakerPage:\n{error}");
+        Assert.NotNull(page);
+    }
+
     private static GifMakerViewModel BuildViewModel() => new(
         new StubAnalyzer(), new StubGifService(), new StubGifSizeProfileStore(),
-        new StubSettings(), new StubHistory(), new StubNotifications());
+        new StubSettings(), new StubHistory(), new StubNotifications(),
+        new VideoPreviewViewModel(new StubAnalyzer(), new StubProxies(), new StubPreviewPlayer()));
 
     /// <summary>A ViewModel with a source already loaded, so every collapsed section (Range, Output,
-    /// estimate, file name/folder, actions) is actually in the rendered layout. The analyzer stub
-    /// returns an already-completed Task, so awaiting it inline does not deadlock the dispatcher.</summary>
+    /// estimate, file name/folder, actions, and the preview) is actually in the rendered layout. The
+    /// analyzer stub returns an already-completed Task, so awaiting it inline does not deadlock the
+    /// dispatcher -- and <see cref="StubPreviewPlayer"/> answers <c>Open</c> SYNCHRONOUSLY for the same
+    /// reason: <c>LoadVideoAsync</c> now also awaits <c>Preview.LoadAsync</c>, and an unattached real
+    /// <c>MediaElementPlayer</c> would never raise <c>MediaOpened</c>/<c>MediaFailed</c> on its own --
+    /// hanging this inline <c>GetAwaiter().GetResult()</c> forever.</summary>
     private static GifMakerViewModel BuildLoadedViewModel()
     {
         var vm = new GifMakerViewModel(
             new SuccessAnalyzer(), new StubGifService(), new StubGifSizeProfileStore(),
-            new StubSettings(), new StubHistory(), new StubNotifications());
+            new StubSettings(), new StubHistory(), new StubNotifications(),
+            new VideoPreviewViewModel(new SuccessAnalyzer(), new StubProxies(), new StubPreviewPlayer()));
 
         vm.LoadVideoAsync(@"C:\fake\video.mp4").GetAwaiter().GetResult();
         return vm;
     }
+
+    /// <summary>A real <see cref="VideoPreview"/> control to host in the page. Deliberately backed by a
+    /// FRESH, unattached <see cref="MediaElementPlayer"/> rather than whatever <c>IMediaPlayer</c> backs
+    /// <paramref name="vm"/>'s own <c>Preview</c> -- this test is about the PAGE's XAML loading, not
+    /// about the preview and player agreeing, and <c>VideoPreview</c>'s constructor requires the
+    /// concrete <see cref="MediaElementPlayer"/> type, not the (here, stubbed) interface.</summary>
+    private static VideoPreview BuildPreviewControl(GifMakerViewModel vm) => new(vm.Preview, new MediaElementPlayer());
 
     /// <summary>Runs on the ONE shared STA thread that owns the ONE WPF Application (see
     /// <see cref="WpfHost"/>).</summary>
@@ -141,6 +192,47 @@ public class GifMakerPageLoadTests
                 TimeSpan.FromSeconds(30), "mov,mp4,m4a",
                 new VideoStreamInfo(1920, 1080, new FrameRate(30, 1), "h264", "yuv420p", 0),
                 new AudioStreamInfo("aac", 48_000, 2))));
+    }
+
+    /// <summary>Answers <c>Open</c> synchronously — see <see cref="BuildLoadedViewModel"/>'s doc comment
+    /// for why an unattached real <c>MediaElementPlayer</c> would hang this file's inline
+    /// <c>GetAwaiter().GetResult()</c> instead.</summary>
+    private sealed class StubPreviewPlayer : IMediaPlayer
+    {
+        public TimeSpan Position { get; set; }
+
+        public TimeSpan? Duration { get; private set; }
+
+        public bool IsPlaying { get; private set; }
+
+        public event EventHandler? MediaOpened;
+
+#pragma warning disable CS0067 // This stub never fails an open or reaches the end; IMediaPlayer still requires the events.
+        public event EventHandler<string>? MediaFailed;
+
+        public event EventHandler? MediaEnded;
+#pragma warning restore CS0067
+
+        public void Open(string path)
+        {
+            Duration = TimeSpan.FromSeconds(30);
+            MediaOpened?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void Play() => IsPlaying = true;
+
+        public void Pause() => IsPlaying = false;
+    }
+
+    private sealed class StubProxies : IPreviewProxyService
+    {
+        public Task<Result<string>> GetOrCreateAsync(
+            string sourcePath, MediaInfo info, IProgress<double>? progress = null, CancellationToken ct = default)
+            => Task.FromResult(Result<string>.Success(sourcePath));
+
+        public void SweepStale()
+        {
+        }
     }
 
     private sealed class StubGifService : IGifService

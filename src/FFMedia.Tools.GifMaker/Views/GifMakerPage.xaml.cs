@@ -1,24 +1,34 @@
 using System.Windows;
 using System.Windows.Controls;
 using FFMedia.Tools.GifMaker.ViewModels;
+using FFMedia.Ui.Views;
 
 namespace FFMedia.Tools.GifMaker.Views;
 
 /// <summary>The GIF Maker page. The only code here is what genuinely needs the visual tree — the
-/// file/folder pickers and drag-drop. Everything else lives in <see cref="GifMakerViewModel"/>, which
-/// is headless and unit-tested; a file dialog is not something a ViewModel should own, and a drag
-/// gesture is not something one can express in a binding.</summary>
+/// file/folder pickers, drag-drop, and hosting the <see cref="VideoPreview"/> control. Everything else
+/// lives in <see cref="GifMakerViewModel"/>, which is headless and unit-tested; a file dialog is not
+/// something a ViewModel should own, and a drag gesture is not something one can express in a
+/// binding.</summary>
 public partial class GifMakerPage : Page
 {
     private readonly GifMakerViewModel _viewModel;
 
-    public GifMakerPage(GifMakerViewModel viewModel)
+    /// <summary><paramref name="preview"/> is taken as its own constructor parameter — like
+    /// <c>VideoPreview</c> itself, which separately takes the <c>MediaElementPlayer</c> singleton — so
+    /// DI can hand this page a fully-built control (constructed with the SAME
+    /// <see cref="GifMakerViewModel.Preview"/> instance the ViewModel already exposes) rather than this
+    /// page trying to construct one itself with no access to the real player.</summary>
+    public GifMakerPage(GifMakerViewModel viewModel, VideoPreview preview)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
+        ArgumentNullException.ThrowIfNull(preview);
 
         _viewModel = viewModel;
         DataContext = viewModel;
         InitializeComponent();
+
+        PreviewHost.Content = preview;
     }
 
     // ---- choosing a video ---------------------------------------------------
