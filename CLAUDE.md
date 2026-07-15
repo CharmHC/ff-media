@@ -33,8 +33,8 @@ milestones. Read it before making design decisions.
 
 ## ▶️ RESUME HERE (next session)
 
-**M9 is COMPLETE and delivered by PR. Nothing is mid-flight.** The branch `feat/m9-video-preview` is
-pushed with all 7 tasks done, reviewed, and green; **the user reviews and merges it** (Rule 3).
+**M9 is COMPLETE and MERGED to `main` (PR #30). Nothing is mid-flight.** All 7 tasks plus the
+click-through fix are on `main`; the next session starts at **M10**. SDD is at **v0.28**.
 
 ### 🚩 The click-through found the preview NEVER WORKED — and why that was inevitable
 
@@ -119,6 +119,32 @@ are unverified against real ffmpeg.
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-15 — Doc sync: M9 is merged, and the SDD had not been told about the fix that made it work
+
+- **The gap:** PR #30 merged M9 to `main` — **including the click-through fix** (`d753a3e`, docs
+  `28df192`) that made the preview open a video at all and made the VP9/WebM fallback reachable. But that
+  fix landed on the branch **after** the SDD v0.27 changelog was written, and it touched **only CLAUDE.md**:
+  the SDD still read **v0.27**, still called M9 *"✅ delivered (branch `feat/m9-video-preview`)"*, and its
+  changelog stopped at the M9-complete row that predates the "never opened" bug. **A Rule 1 lag — the SDD
+  is the single source of truth and it was trailing reality by one merged, feature-saving fix.** The README
+  roadmap was further behind still: it stopped at **M7**, listing neither M8 nor M9.
+- **Done — documentation only, no code touched:**
+  - **SDD.md → v0.28** (last updated 2026-07-15). §17's M9 row: *"delivered (branch)"* → **complete
+    (merged via PR #30)**, and now records the `Manual`-mode `Open()`→`Pause()` fix and the two real-
+    `MediaElement` integration tests (**14/14**). New Changelog row 0.28 telling the "the preview never
+    opened, and 822 green tests said it did" story and its lesson — *"cannot be tested headlessly" was
+    false, and nobody checked.*
+  - **README.md** roadmap: added the missing **M8 (GIF Maker)** and **M9 (Video Preview)** rows.
+  - **CLAUDE.md**: RESUME HERE header flipped from *"delivered by PR — the user reviews and merges it"* to
+    **merged to `main` (PR #30); next session starts at M10**. This entry added.
+- **Left intact deliberately:** the RESUME HERE M10 section and its two blockers (singleton lifetimes won't
+  survive a second preview; the Downloader still carries the 24-hour-vanishing `hh` format bug), and the
+  "still waiting on a human" pixels-and-sound list — all still true and still the right briefing for M10.
+- **Verified:** the merge state (`git log --first-parent main` shows PR #30 merged; `d753a3e`/`28df192`
+  present on `main`) and that the click-through commits touched CLAUDE.md but **not** SDD.md
+  (`git show --stat`). No build/tests run — nothing but Markdown changed.
+- **Next:** user reviews the PR; then **M10** (Merger + Downloader rollout, draggable range band). SDD → v0.28.
 
 ### 2026-07-14 — The click-through: the preview never opened a single video, and 822 green tests said it did
 

@@ -49,6 +49,8 @@ third-party ffmpeg wrapper library.)
 | M5 | Settings, presets, history, theming |
 | M6 | Installer + auto-update, v1 release |
 | M7 | ✅ Video Merger: standardize + merge local clips |
+| M8 | ✅ GIF Maker: one video → one GIF (start/end/size/fps, live size estimate) |
+| M9 | ✅ Video Preview & Frame Capture: play, pause, and capture the frame's timestamp |
 
 ## License
 
