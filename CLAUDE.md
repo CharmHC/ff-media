@@ -33,8 +33,15 @@ milestones. Read it before making design decisions.
 
 ## ▶️ RESUME HERE (next session)
 
-**M9 is COMPLETE and MERGED to `main` (PR #30). Nothing is mid-flight.** All 7 tasks plus the
-click-through fix are on `main`; the next session starts at **M10**. SDD is at **v0.28**.
+**M9 is COMPLETE, MERGED to `main` (PR #30), and SHIPPED in `v1.2.0`. Nothing is mid-flight.** All 7
+tasks plus the click-through fix are on `main`; **`v1.2.0` was tagged and released on 2026-07-15** (the
+first release to actually ship a delta from CI — see the log entry below). The next session starts at
+**M10**. SDD is at **v0.29**.
+
+> ⚠️ **`v1.2.0` ships M9's preview to users, and no human has ever clicked through it.** The
+> *does-it-open* behaviour is now pinned by real-`MediaElement` integration tests, but the pixels-and-sound
+> items below (slider advancing, first frame rendering, playback stopping on navigate-away) went out
+> **unverified**. If they turn out broken, that is a live bug in a public release, not a latent one.
 
 ### 🚩 The click-through found the preview NEVER WORKED — and why that was inevitable
 
@@ -119,6 +126,40 @@ are unverified against real ffmpeg.
 ## 📓 Progress Log
 
 _Newest first. One entry per completed task/session._
+
+### 2026-07-15 — Released v1.2.0 (GIF Maker + video preview) — and the delta finally shipped from CI
+
+- **Done:** cut the first release since v1.1.1. It bundles the two whole tools that merged in between —
+  **the GIF Maker (M8)** and **the video preview with frame capture (M9)** — so it is a **minor** bump
+  (v1.1.1 → **v1.2.0**), two additive features, no breaking change. Tagged `v1.2.0` (annotated) at `main`
+  HEAD (`96002e3`) and pushed; the tag-gated `release.yml` packed (Velopack) and published the GitHub
+  Release. Then applied **house-style release notes** (feature/fix sections + install/update instructions
+  + bundled-versions footer) via `gh release edit`, since the workflow publishes only a default body.
+- **The delta shipped from CI for the first time — the v0.22 fix proven in production.** Every release
+  from v1.0.0 through v1.1.1 shipped **full-only** (~191 MB per update); the fix that pulls the previous
+  release before packing landed *after* v1.1.1, so it had never actually run against a real prior release
+  in CI — only a local dry-run. This time the workflow logged `Building delta 1.1.1 -> 1.2.0` —
+  **9 files patched, 2 new, 432 unchanged (excluded)** — and the release carries both a full and a
+  `*-delta.nupkg`. An existing v1.1.1 user now updates with a **sub-1 MB** download instead of 191 MB.
+  I verified this from the workflow log and the published assets, not by trusting the green run — the
+  whole reason this bug survived four releases is that "pack succeeded" was never evidence a delta existed.
+- **Pre-flight, from a clean checkout before tagging:** `main` in sync with `origin/main`; clean
+  (`--no-incremental`) Release build **0 warnings / 0 errors**; **822/822** unit tests. The remote and the
+  workflow's `--repoUrl` both name the canonical `CharmHC/ff-media`.
+- **NOT verified — and this one ships to users in this build.** M9's preview has still had **no human
+  click-through**. The *does-it-open* behaviour is now pinned by real-`MediaElement` integration tests, but
+  whether the readout/slider **visibly advance**, whether the **first frame renders** on load, and whether
+  a preview left **playing stops** on navigate-away are pixels-and-sound a test cannot judge — and they went
+  out unverified. Flagged to the user at release time; they chose to ship. **If any of those is broken, it
+  is now a live bug in a public release.**
+- **Left deliberately unchanged:** the cosmetic `<Version>0.9.0</Version>` in `FFMedia.App.csproj` —
+  `pack.ps1` overrides it with the tag version (`-p:Version=$Version`), so the shipped build is correctly
+  1.2.0 and the csproj value only affects a dev build's displayed version. Not worth a commit-to-`main`.
+- **Verified:** release is public, non-draft, non-prerelease at
+  `https://github.com/CharmHC/ff-media/releases/tag/v1.2.0`; the workflow run concluded **success**.
+- **Next:** M10 — read the minors roll-up first (singleton lifetimes won't survive a second preview; the
+  Downloader still carries the 24-hour-vanishing `hh` format bug). This release entry: SDD → **v0.29**.
+  Delivered via branch `docs/release-v1.2.0` → PR.
 
 ### 2026-07-15 — Doc sync: M9 is merged, and the SDD had not been told about the fix that made it work
 
